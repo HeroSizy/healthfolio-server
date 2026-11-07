@@ -53,7 +53,7 @@ func TestMCP(t *testing.T) {
 
 	// the app mints a separate MCP token and gets copyable configs
 	code, c := do(t, "POST", ts.URL+"/mcp/tokens", "master", `{"name":"Claude"}`)
-	if code != 200 || c["url"] != ts.URL+"/mcp" || !strings.Contains(c["configs"].(map[string]any)["claude_code"].(string), "claude mcp add") {
+	if code != 200 || c["url"] != "http://192.168.1.2:8787/mcp" || !strings.Contains(c["configs"].(map[string]any)["claude_code"].(string), "claude mcp add") {
 		t.Fatalf("mcp token: %d %v", code, c)
 	}
 	if code, _ := do(t, "POST", ts.URL+"/mcp", c["token"].(string), `{"jsonrpc":"2.0","id":1,"method":"ping"}`); code != 200 {
