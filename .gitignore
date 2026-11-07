@@ -1,0 +1,5 @@
+/healthsync-server
+/dist/
+/data/
+*.db
+*.db-*

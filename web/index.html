@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HealthSync Server</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23ff375f'/%3E%3Cpath d='M16 24s-7-4.4-7-9.2A3.8 3.8 0 0 1 16 12a3.8 3.8 0 0 1 7 2.8C23 19.6 16 24 16 24z' fill='%23fff'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand">
+    <span class="logo" aria-hidden="true"></span>
+    <div>
+      <h1 id="server-name">HealthSync</h1>
+      <p class="sub" id="server-sub">&nbsp;</p>
+    </div>
+  </div>
+  <nav class="tabs" role="tablist">
+    <button role="tab" data-tab="overview" data-i18n="tab.overview">Overview</button>
+    <button role="tab" data-tab="history" data-i18n="tab.history">Sync history</button>
+    <button role="tab" data-tab="devices" data-i18n="tab.devices">Pair &amp; devices</button>
+    <button role="tab" data-tab="reports" data-i18n="tab.reports">Checkups</button>
+  </nav>
+</header>
+
+<main>
+  <!-- overview -->
+  <section id="tab-overview" class="tab">
+    <div class="tiles">
+      <div class="tile"><span class="label" data-i18n="ov.records">Records</span><span class="value" id="t-total">–</span><span class="hint" id="t-types"></span></div>
+      <div class="tile"><span class="label" data-i18n="ov.last">Last sync</span><span class="value" id="t-last">–</span><span class="hint" id="t-last-hint"></span></div>
+      <div class="tile"><span class="label" data-i18n="ov.devices">Paired devices</span><span class="value" id="t-devices">–</span><span class="hint"><a href="#devices" data-i18n="ov.pairnew">Pair a new iPhone →</a></span></div>
+      <div class="tile"><span class="label" data-i18n="ov.reports">Checkup reports</span><span class="value" id="t-reports">–</span><span class="hint" id="t-reports-hint"></span></div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h2 data-i18n="ov.activity">New records per day</h2><span class="muted" data-i18n="ov.30d">last 30 days</span></div>
+      <div id="activity" class="chart"></div>
+    </div>
+
+    <div class="grid2">
+      <div class="card">
+        <div class="card-head"><h2 data-i18n="ov.types">Data types</h2><input id="type-filter" type="search" data-i18n-ph="ov.filter" placeholder="Filter"></div>
+        <div class="scroll"><table class="list" id="types"><thead><tr><th data-i18n="col.type">Type</th><th class="num" data-i18n="col.count">Count</th><th data-i18n="col.latest">Latest</th></tr></thead><tbody></tbody></table></div>
+      </div>
+      <div class="card" id="type-detail">
+        <div class="card-head"><h2 id="td-title" data-i18n="ov.pick">Pick a type</h2><select id="td-days"><option value="7">7d</option><option value="30" selected>30d</option><option value="365">1y</option></select></div>
+        <div id="td-chart" class="chart tall"><p class="empty" data-i18n="ov.pickhint">Click a data type to see its daily values.</p></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h2 data-i18n="ov.server">Server</h2></div>
+      <dl class="kv" id="server-info"></dl>
+    </div>
+  </section>
+
+  <!-- history -->
+  <section id="tab-history" class="tab" hidden>
+    <div class="card">
+      <div class="card-head">
+        <h2 data-i18n="tab.history">Sync history</h2>
+        <div class="seg" id="kind-filter">
+          <button data-kind="" class="on" data-i18n="k.all">All</button>
+          <button data-kind="ingest" data-i18n="k.ingest">Data</button>
+          <button data-kind="report" data-i18n="k.report">Checkups</button>
+          <button data-kind="pair" data-i18n="k.pair">Pairing</button>
+          <button data-kind="auth" data-i18n="k.auth">Rejected</button>
+          <button data-kind="hook" data-i18n="k.hook">Hook</button>
+        </div>
+      </div>
+      <div class="scroll"><table class="list" id="logs"><thead><tr>
+        <th data-i18n="col.time">Time</th><th data-i18n="col.event">Event</th><th data-i18n="col.device">Device</th>
+        <th class="num" data-i18n="col.received">Received</th><th class="num" data-i18n="col.new">New</th><th data-i18n="col.detail">Detail</th>
+      </tr></thead><tbody></tbody></table></div>
+      <button class="ghost wide" id="more" data-i18n="more">Load more</button>
+    </div>
+  </section>
+
+  <!-- pairing -->
+  <section id="tab-devices" class="tab" hidden>
+    <div id="pending"></div>
+    <div class="card pair">
+      <div class="pair-body">
+        <div class="qr" id="qr"><button class="primary" id="pair-btn" data-i18n="pair.new">Pair a new iPhone</button></div>
+        <div class="pair-text">
+          <h2 data-i18n="pair.title">Pair with the HealthSync app</h2>
+          <ol>
+            <li data-i18n="pair.s1">Click “Pair a new iPhone” to show a one-time code.</li>
+            <li data-i18n="pair.s2">On the iPhone, scan the QR code with the Camera or in HealthSync → Add destination → Local server.</li>
+            <li data-i18n="pair.s3">The app saves the address and its own token. Done.</li>
+          </ol>
+          <div id="pair-active" hidden>
+            <p class="code" id="pair-code"></p>
+            <p class="muted"><span data-i18n="pair.expires">Expires in</span> <span id="pair-left"></span> · <span id="pair-url"></span></p>
+            <p><button class="ghost" id="pair-copy" data-i18n="pair.copy">Copy link</button> <button class="ghost" id="pair-cancel" data-i18n="pair.cancel">Cancel</button></p>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-head"><h2 data-i18n="dev.title">Paired devices</h2></div>
+      <div class="scroll"><table class="list" id="devices"><thead><tr>
+        <th data-i18n="col.device">Device</th><th data-i18n="dev.paired">Paired</th><th data-i18n="dev.seen">Last seen</th><th></th>
+      </tr></thead><tbody></tbody></table></div>
+      <details class="token">
+        <summary data-i18n="tok.title">Shared token (manual setup)</summary>
+        <p class="muted" data-i18n="tok.hint">Paste this into the app if you can't scan. Every paired device has its own token instead, which you can revoke above.</p>
+        <p><code id="token">••••••••</code> <button class="ghost" id="token-show" data-i18n="tok.show">Show</button></p>
+      </details>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h2 data-i18n="mcp.title">AI assistants (MCP)</h2></div>
+      <p class="muted" data-i18n="mcp.hint">Let Claude or another MCP client read your health data (read-only). Create a token for it; you can revoke it above like any device.</p>
+      <p><button class="ghost" id="mcp-token" data-i18n="mcp.create">Create token for an AI assistant</button></p>
+      <div id="mcp-setup" hidden>
+        <p class="muted" data-i18n="mcp.once">Copy it now, it won't be shown again.</p>
+        <p class="muted">Claude Code</p>
+        <pre class="snippet" id="mcp-cc"></pre>
+        <p class="muted" data-i18n="mcp.other">Other clients (Streamable HTTP)</p>
+        <pre class="snippet" id="mcp-json"></pre>
+      </div>
+      <p class="muted"><span data-i18n="mcp.local">On this computer, desktop apps can also run it over stdio without a token:</span></p>
+      <pre class="snippet">{"mcpServers": {"healthsync": {"command": "healthsync-server", "args": ["mcp"]}}}</pre>
+    </div>
+  </section>
+
+  <!-- reports -->
+  <section id="tab-reports" class="tab" hidden>
+    <div class="card">
+      <div class="card-head"><h2 data-i18n="tab.reports">Checkups</h2></div>
+      <p class="muted" data-i18n="rep.hint">Checkup reports imported in the app (PDF / photo → structured values). Files are kept in the reports folder of the data directory.</p>
+      <div class="scroll"><table class="list" id="reports"><thead><tr>
+        <th data-i18n="col.date">Date</th><th data-i18n="rep.inst">Institution</th><th class="num" data-i18n="rep.items">Items</th><th class="num" data-i18n="rep.flagged">Flagged</th><th data-i18n="rep.received">Received</th>
+      </tr></thead><tbody></tbody></table></div>
+    </div>
+  </section>
+</main>
+<footer><a href="https://github.com/herosizy/healthsync-server" target="_blank" rel="noopener">healthsync-server</a> <span id="ver"></span></footer>
+<script src="app.js"></script>
+</body>
+</html>
