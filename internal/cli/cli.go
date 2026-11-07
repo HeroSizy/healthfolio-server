@@ -13,6 +13,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/herosizy/healthsync-server/internal/telemetry"
 	"github.com/herosizy/healthsync-server/server"
 )
 
@@ -44,7 +45,15 @@ func Main(args []string) {
 	var err error
 	switch cmd {
 	case "serve":
-		err = serve(cfg)
+		flush := telemetry.Init("server", server.Version(), false)
+		func() {
+			defer telemetry.Recover()
+			err = serve(cfg)
+		}()
+		if err != nil {
+			telemetry.Error("serve", err)
+		}
+		flush()
 	case "pair":
 		err = cmdPair(cfg)
 	case "token":

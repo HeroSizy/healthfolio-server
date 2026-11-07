@@ -14,6 +14,8 @@ type Sample struct {
 	pair     *model.PairInfo
 	update   func(func())
 	devices  []model.Device
+
+	manualUpdates bool
 }
 
 func NewSample(update func(func())) *Sample {
@@ -141,3 +143,8 @@ func (s *Sample) Copy(string)                                 {}
 func (s *Sample) OpenURL(string)                              {}
 func (s *Sample) ChooseFolder(_, _ string, done func(string)) { done("/Volumes/T7/HealthSync") }
 func (s *Sample) Update(fn func())                            { s.update(fn) }
+func (s *Sample) Updates() model.Updates {
+	return model.Updates{Version: "0.0.1", Supported: true, Automatic: !s.manualUpdates}
+}
+func (s *Sample) CheckForUpdates()            {}
+func (s *Sample) SetAutomaticUpdates(on bool) { s.manualUpdates = !on }

@@ -1,25 +1,78 @@
+# Releases on their own: bump "version" in mygo.json (and add its section to
+# CHANGELOG.md), push to main, and this workflow tags v<version>, builds everything into a
+# draft release and publishes it once every part is there. Installed desktop apps then
+# update to it. Pushes that keep the version, or whose tag exists, release nothing.
 name: release
 on:
   push:
-    tags: ["v*"]
+    branches: [main]
+  workflow_dispatch:
 permissions:
   contents: write
   packages: write
+concurrency: { group: release, cancel-in-progress: false }
+env:
+  # Crash reports of official builds (a Sentry DSN only lets clients send events).
+  SENTRY_DSN: https://4c94bbfd83f6cda9d674dd7c4930ac6b@o325852.ingest.us.sentry.io/4512390051135488
 jobs:
-  binaries:
+  prepare:
     runs-on: ubuntu-latest
+    outputs:
+      release: ${{ steps.v.outputs.release }}
+      tag: ${{ steps.v.outputs.tag }}
+      version: ${{ steps.v.outputs.version }}
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
-      - uses: actions/setup-go@v5
-        with: { go-version-file: go.mod }
-      - uses: goreleaser/goreleaser-action@v6
-        with: { args: release --clean }
-        env: { GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}" }
-  docker:
+      - id: v
+        env: { HAS_KEY: "${{ secrets.MYGO_UPDATER_PRIVATE_KEY != '' }}" }
+        run: |
+          v=$(jq -r .version mygo.json)
+          tag="v$v"
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+            echo "$tag exists; nothing to release"; echo "release=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          if [ "$(jq -r '.updates.publicKey // ""' mygo.json)" = "" ] || [ "$HAS_KEY" != true ]; then
+            echo "::warning::not releasing $tag: mygo.json needs updates.publicKey and the repository the MYGO_UPDATER_PRIVATE_KEY secret"
+            echo "release=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          if ! grep -qE "^## \[?$v\]?" CHANGELOG.md; then
+            echo "::error::CHANGELOG.md has no '## $v' section"; exit 1
+          fi
+          echo "release=true" >> "$GITHUB_OUTPUT"
+      - name: Tag and create the draft release
+        if: steps.v.outputs.release == 'true'
+        env: { GH_TOKEN: "${{ github.token }}", TAG: "${{ steps.v.outputs.tag }}", V: "${{ steps.v.outputs.version }}" }
+        run: |
+          git tag "$TAG" "$GITHUB_SHA"
+          git push origin "$TAG"
+          awk -v v="$V" '/^## /{p = ($0 ~ "^## \\[?" v "\\]?([ ]|$)")} p' CHANGELOG.md | tail -n +2 > notes.md
+          gh release create "$TAG" --draft --verify-tag --title "HealthSync $V" --notes-file notes.md
+
+  binaries:
+    needs: prepare
+    if: needs.prepare.outputs.release == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with: { fetch-depth: 0, ref: "${{ needs.prepare.outputs.tag }}" }
+      - uses: actions/setup-go@v5
+        with: { go-version-file: go.mod }
+      - uses: goreleaser/goreleaser-action@v6
+        with: { args: release --clean --skip=publish }
+      - name: Upload to the draft release
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: gh release upload "${{ needs.prepare.outputs.tag }}" dist/*.tar.gz dist/*.zip dist/checksums.txt --clobber
+
+  docker:
+    needs: prepare
+    if: needs.prepare.outputs.release == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: "${{ needs.prepare.outputs.tag }}" }
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
@@ -29,20 +82,24 @@ jobs:
         with:
           images: ghcr.io/${{ github.repository }}
           tags: |
-            type=semver,pattern={{version}}
+            type=semver,pattern={{version}},value=${{ needs.prepare.outputs.tag }}
             type=raw,value=latest
       - uses: docker/build-push-action@v6
         with:
           context: .
           platforms: linux/amd64,linux/arm64,linux/arm/v7
           push: true
-          build-args: VERSION=${{ github.ref_name }}
+          build-args: |
+            VERSION=${{ needs.prepare.outputs.version }}
+            SENTRY_DSN=${{ env.SENTRY_DSN }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+
   desktop:
-    # The desktop app (native window + menu bar), packaged by MyGo. Unsigned on macOS:
-    # the first launch needs right-click > Open.
-    needs: binaries
+    # The desktop app, packaged by MyGo with signed self-updates (mygo.json "updates").
+    # Unsigned on macOS (no Developer ID): the first launch needs right-click > Open.
+    needs: prepare
+    if: needs.prepare.outputs.release == 'true'
     name: desktop ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
     strategy:
@@ -54,19 +111,25 @@ jobs:
           - { name: Linux, os: ubuntu-latest, platform: "linux/amd64,linux/arm64" }
     steps:
       - uses: actions/checkout@v4
+        with: { ref: "${{ needs.prepare.outputs.tag }}" }
       - uses: actions/setup-go@v5
         with: { go-version-file: go.mod }
       - name: Install NSIS, for the Windows installers
         if: matrix.name == 'Windows'
         run: sudo apt-get update && sudo apt-get install -y nsis
-      - name: Build
-        run: |
-          jq --arg v "${GITHUB_REF_NAME#v}" '.version = $v' mygo.json > mygo.tmp && mv mygo.tmp mygo.json
-          go tool mygo build -platform "${{ matrix.platform }}"
-      - name: Upload to the release
+      - name: Build and upload
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MYGO_UPDATER_PRIVATE_KEY: ${{ secrets.MYGO_UPDATER_PRIVATE_KEY }}
+          MYGO_LDFLAGS: >-
+            -X github.com/herosizy/healthsync-server/server.version=${{ needs.prepare.outputs.version }}
+            -X github.com/herosizy/healthsync-server/internal/telemetry.dsn=${{ env.SENTRY_DSN }}
+        run: go tool mygo build -platform "${{ matrix.platform }}" -upload
+
+  publish:
+    needs: [prepare, binaries, docker, desktop]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish the release, which installed apps update to
         env: { GH_TOKEN: "${{ github.token }}" }
-        shell: bash
-        run: |
-          files=$(find build -type f \( -name '*.dmg' -o -name '*-setup-*.exe' -o -name '*.deb' -o -name '*.tar.gz' \))
-          echo "$files"
-          gh release upload "$GITHUB_REF_NAME" $files --clobber
+        run: gh release edit "${{ needs.prepare.outputs.tag }}" --repo "$GITHUB_REPOSITORY" --draft=false --latest

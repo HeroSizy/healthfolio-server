@@ -135,4 +135,14 @@ type Settings struct {
 	AdminPassword string `json:"admin_password,omitempty"`
 	NoBonjour     bool   `json:"no_bonjour,omitempty"`
 	Notify        bool   `json:"notify,omitempty"` // desktop notification after each sync
+	// NoCrashReports stops sending crash reports (errors and stack traces, never health data).
+	NoCrashReports bool `json:"no_crash_reports,omitempty"`
+}
+
+// Updates is the state of the desktop app's self-updates, for the settings page.
+type Updates struct {
+	Version   string // the running version
+	Supported bool   // this build can update itself (not a development build or a package)
+	Automatic bool   // checks in the background and installs
+	Available string // a newer version found, or ""
 }

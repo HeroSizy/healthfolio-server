@@ -23,9 +23,12 @@ import (
 	"time"
 
 	"github.com/egoist/mygo"
+	"github.com/egoist/mygo/plugins/updater"
+	"github.com/egoist/mygo/plugins/updater/native"
 	"github.com/egoist/mygo/ui"
 	"github.com/herosizy/healthsync-server/desktop"
 	"github.com/herosizy/healthsync-server/internal/cli"
+	"github.com/herosizy/healthsync-server/internal/telemetry"
 	"github.com/herosizy/healthsync-server/model"
 	"github.com/herosizy/healthsync-server/server"
 )
@@ -44,7 +47,13 @@ func main() {
 	}
 	h := &host{}
 	h.settings = loadSettings()
+	flush := telemetry.Init("desktop", mygo.App.Version(), h.settings.NoCrashReports)
+	defer flush()
+	defer telemetry.Recover()
 	h.app = desktop.New(h, isChinese())
+	// Self-updates from the GitHub releases (mygo.json "updates"), in a native window.
+	mygo.Use(native.Plugin)
+	updater.OnChange(h.app.Refresh)
 	mygo.App.SetName("HealthSync")
 	mygo.App.OnBeforeQuit(func(*mygo.QuitEvent) { h.quitting = true })
 	mygo.App.WhenReady(h.ready)
@@ -118,6 +127,19 @@ func (h *host) ChooseFolder(title, start string, done func(string)) {
 	}()
 }
 
+func (h *host) Updates() model.Updates {
+	return model.Updates{Version: mygo.App.Version(), Supported: mygo.Updater.Enabled(),
+		Automatic: updater.AutomaticChecks(), Available: updater.AvailableVersion()}
+}
+
+func (h *host) CheckForUpdates() { updater.CheckForUpdates() }
+
+// SetAutomaticUpdates checks in the background and installs what it finds, or neither.
+func (h *host) SetAutomaticUpdates(on bool) {
+	updater.SetAutomaticChecks(on)
+	updater.SetAutomaticDownloads(on)
+}
+
 func (h *host) Update(fn func()) {
 	if h.win == nil {
 		mygo.RunOnMain(fn)
@@ -136,6 +158,7 @@ func (h *host) startServer() {
 	if err != nil {
 		h.err = err.Error()
 		log.Printf("server: %v", err)
+		telemetry.Error("start server", err)
 	}
 	h.mu.Unlock()
 	h.app.Refresh()
@@ -245,6 +268,7 @@ func (h *host) trayMenu() *mygo.Menu {
 		}},
 		mygo.Separator(),
 		{Label: t("设置…", "Settings…"), Click: open("settings")},
+		updater.MenuItem(),
 		{Role: mygo.RoleQuit},
 	})
 }

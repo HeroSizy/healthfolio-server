@@ -117,6 +117,25 @@ are 6 digits, single use, valid 10 minutes, and burn after 5 wrong guesses. Devi
 are stored hashed. If you expose the server outside your LAN (e.g. through Tailscale or a
 reverse proxy), set `HEALTHSYNC_ADMIN_PASSWORD` and put TLS in front of it.
 
+### Updates and crash reports
+
+The desktop app updates itself from this repository's releases: it checks once a day, and
+every update is signed (MyGo's updater checks it against the public key in mygo.json).
+Settings › Updates turns that off or checks now; the menu bar has "Check for Updates…".
+
+Official builds send crash reports to Sentry: the error, its stack trace, the version and
+the OS. Requests, health data and host names are removed before sending.
+Turn them off in Settings › Privacy or with `HEALTHSYNC_NO_TELEMETRY=1`; builds from source
+send nothing.
+
+### Releasing
+
+Bump `version` in mygo.json, add a `## <version>` section to CHANGELOG.md and push to
+main. The release workflow tags `v<version>`, builds the server binaries, the Docker image
+and the desktop apps with their signed updates into a draft release, and publishes it when
+everything is there. It needs the `MYGO_UPDATER_PRIVATE_KEY` secret (from `go tool mygo
+keygen`).
+
 ### Hook
 
 With `-hook 'my-script.sh'`, received records are also written to `<data>/inbox/app-*.txt`

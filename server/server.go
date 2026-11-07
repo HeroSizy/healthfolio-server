@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/herosizy/healthsync-server/internal/telemetry"
 	"github.com/herosizy/healthsync-server/model"
 	"io"
 	"io/fs"
@@ -71,7 +72,17 @@ func NewServer(cfg *Config, db *DB, token string) (*Server, error) {
 	return s, nil
 }
 
-func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) { s.mux.ServeHTTP(w, r) }
+func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	defer func() {
+		if p := recover(); p != nil {
+			if p != http.ErrAbortHandler {
+				telemetry.Errorf(r.Method+" "+r.Pattern, fmt.Sprintf("panic: %v", p))
+			}
+			panic(p) // net/http logs it and closes the connection
+		}
+	}()
+	s.mux.ServeHTTP(w, r)
+}
 
 func (s *Server) routes() {
 	m := http.NewServeMux()
@@ -241,6 +252,9 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 		entry.Message, entry.DurationMS = msg, int(time.Since(start).Milliseconds())
 		s.db.Log(entry)
 		logf("ingest from %s failed: %s", device, msg)
+		if code >= 500 {
+			telemetry.Errorf("ingest", msg)
+		}
 		errJSON(w, code, msg)
 	}
 	rows, err := ParseBody(body)

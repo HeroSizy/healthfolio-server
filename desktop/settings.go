@@ -98,11 +98,51 @@ func (a *App) settingsPage(c *ui.Context, pal *palette) {
 					changed = toggle(c, &f.Notify, pal).Changed() || changed
 				})
 			})
+			a.updatesGroup(c, pal)
+			a.group(c, pal, a.t("隐私", "Privacy"), "", func() {
+				send := !f.NoCrashReports
+				a.settingRow(c, pal, a.t("发送崩溃报告", "Send crash reports"),
+					a.t("只有出错的位置和版本号，不包含任何健康数据；重新打开 App 后生效", "Only where it failed and the version, never health data; applies after relaunching"), func() {
+						if toggle(c, &send, pal).Changed() {
+							f.NoCrashReports = !send
+							changed = true
+						}
+					})
+			})
 		})
 	})
 	if changed {
 		a.formDirty = true
 	}
+}
+
+// updatesGroup shows the version and the self-update choices, which apply at once.
+func (a *App) updatesGroup(c *ui.Context, pal *palette) {
+	u := a.host.Updates()
+	sub := a.t("当前版本 ", "Version ") + u.Version
+	if u.Available != "" {
+		sub += a.t(" · 有新版本 ", " · ") + u.Available + a.t("", " is available")
+	}
+	a.group(c, pal, a.t("更新", "Updates"), sub, func() {
+		if !u.Supported {
+			ui.Text(c, a.t("开发版或用软件包安装的版本不能自己更新", "Development builds and packaged installs can't update themselves")).
+				FontSize(12).TextColor(pal.textMuted)
+			return
+		}
+		auto := u.Automatic
+		a.settingRow(c, pal, a.t("自动更新", "Update automatically"), a.t("每天检查一次，新版本在后台下载，下次打开时装好", "Checks daily, downloads in the background, installs at the next launch"), func() {
+			if toggle(c, &auto, pal).Changed() {
+				a.host.SetAutomaticUpdates(auto)
+				a.Refresh()
+			}
+		})
+		a.divider(c, pal)
+		a.settingRow(c, pal, a.t("检查更新", "Check for updates"), a.t("下载的更新都经过签名校验", "Every update is checked against its signature"), func() {
+			if ui.Button(c, a.t("立即检查…", "Check Now…")).Clicked() {
+				a.host.CheckForUpdates()
+			}
+		})
+	})
 }
 
 func (a *App) save() {

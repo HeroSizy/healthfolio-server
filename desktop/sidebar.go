@@ -45,9 +45,11 @@ func (a *App) nav() []navItem {
 		{"pair", iconPair, "配对和设备", "Pair & Devices"},
 		{"mcp", iconMCP, "AI 助手", "AI Assistants"},
 		{"reports", iconReports, "体检报告", "Checkups"},
-		{"settings", iconSettings, "设置", "Settings"},
 	}
 }
+
+// settingsNav sits at the bottom of the sidebar, under the server status, as in Kero.
+var settingsNav = navItem{"settings", iconSettings, "设置", "Settings"}
 
 const sidebarW = 220
 
@@ -70,6 +72,8 @@ func (a *App) sidebar(c *ui.Context, pal *palette, bar ui.TitleBar) {
 		}
 		ui.Spacer(c)
 		a.status(c, pal)
+		ui.Box(c).Height(6)
+		a.navRow(c, pal, settingsNav)
 	})
 }
 

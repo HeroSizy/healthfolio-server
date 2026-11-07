@@ -3,6 +3,8 @@ module github.com/herosizy/healthsync-server
 go 1.27.3
 
 require (
+	github.com/egoist/mygo v0.8.1
+	github.com/getsentry/sentry-go v0.50.0
 	github.com/grandcat/zeroconf v1.0.0
 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
 	modernc.org/sqlite v1.61.1
@@ -12,7 +14,6 @@ require (
 	github.com/cenkalti/backoff v2.2.1+incompatible // indirect
 	github.com/dustin/go-humanize v1.1.0 // indirect
 	github.com/ebitengine/purego v0.11.1 // indirect
-	github.com/egoist/mygo v0.8.1 // indirect
 	github.com/go-text/typesetting v0.3.5 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/mattn/go-isatty v0.0.24 // indirect

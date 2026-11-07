@@ -43,6 +43,11 @@ type Host interface {
 	ChooseFolder(title, start string, done func(path string))
 	// Update runs fn on the main thread and redraws the window.
 	Update(fn func())
+	// Updates is the state of the app's self-updates; CheckForUpdates checks as the user
+	// asked, in the update window; SetAutomaticUpdates turns background checks on or off.
+	Updates() model.Updates
+	CheckForUpdates()
+	SetAutomaticUpdates(on bool)
 }
 
 // App is the window's state. The view and Update callbacks run on the main thread.

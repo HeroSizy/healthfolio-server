@@ -1,11 +1,11 @@
 # syntax=docker/dockerfile:1
 FROM --platform=$BUILDPLATFORM golang:1.27-alpine AS build
-ARG TARGETOS TARGETARCH VERSION=dev
+ARG TARGETOS TARGETARCH VERSION=dev SENTRY_DSN=
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags "-s -w -X github.com/herosizy/healthsync-server/server.version=$VERSION" -o /out/healthsync-server .
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags "-s -w -X github.com/herosizy/healthsync-server/server.version=$VERSION -X github.com/herosizy/healthsync-server/internal/telemetry.dsn=$SENTRY_DSN" -o /out/healthsync-server .
 
 FROM alpine:3.22
 RUN apk add --no-cache ca-certificates tzdata && adduser -D -u 1000 healthsync && mkdir /data && chown healthsync /data

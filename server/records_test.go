@@ -10,7 +10,7 @@ import (
 
 // The app's JSON Lines rows (HealthRecord.jsonLine), and a deletion.
 const (
-	jsonlHR      = `{"device_model":"Watch7,5","device_software":"11.1","end":"2026-11-01T08:00:00+08:00","metadata":{"HKMetadataKeyHeartRateMotionContext":"1"},"source":"Zen's Apple Watch","source_bundle":"com.apple.health.ABC","source_version":"11.1","start":"2026-11-01T08:00:00+08:00","type":"HeartRate","tz":"Asia/Shanghai","unit":"count/min","uuid":"U-HR","value":61}`
+	jsonlHR      = `{"device_model":"Watch7,5","device_software":"11.1","end":"2026-11-01T08:00:00+08:00","metadata":{"HKMetadataKeyHeartRateMotionContext":"1"},"source":"My Apple Watch","source_bundle":"com.apple.health.ABC","source_version":"11.1","start":"2026-11-01T08:00:00+08:00","type":"HeartRate","tz":"Asia/Shanghai","unit":"count/min","uuid":"U-HR","value":61}`
 	jsonlSteps   = `{"end":"2026-11-01T08:10:00+08:00","source":"iPhone","start":"2026-11-01T08:00:00+08:00","type":"StepCount","unit":"count","user_entered":true,"uuid":"U-STEPS","value":512}`
 	jsonlWorkout = `{"end":"2026-11-01T19:30:00+08:00","metadata":{"active_energy_kcal":"320.5","distance_km":"5.2","duration_s":"1800"},"source":"Watch","start":"2026-11-01T19:00:00+08:00","type":"Workout","unit":"","uuid":"U-RUN","value":"Running"}`
 )
