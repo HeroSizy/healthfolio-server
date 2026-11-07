@@ -349,3 +349,79 @@ func cmdMCP(cfg *Config) error {
 	}
 	return m.ServeStdio(os.Stdin, os.Stdout)
 }
+
+// MCPConnect is everything a client needs to show "connect your AI agent" with one-tap copy.
+// Used by the dashboard and by the iPhone app (POST /mcp/tokens).
+type MCPConnect struct {
+	Name       string            `json:"name"`
+	Token      string            `json:"token"`
+	URL        string            `json:"url"`
+	Transport  string            `json:"transport"`
+	Configs    map[string]string `json:"configs"`
+	ConfigList []MCPConfig       `json:"config_list"`
+}
+
+type MCPConfig struct {
+	ID    string `json:"id"`
+	Title string `json:"title"`
+	Text  string `json:"text"`
+}
+
+func mcpConnect(serverName, url, token string) MCPConnect {
+	auth := "Bearer " + token
+	jsonCfg, _ := json.MarshalIndent(map[string]any{"mcpServers": map[string]any{"healthsync": map[string]any{
+		"type": "http", "url": url, "headers": map[string]string{"Authorization": auth}}}}, "", "  ")
+	remote, _ := json.MarshalIndent(map[string]any{"mcpServers": map[string]any{"healthsync": map[string]any{
+		"command": "npx", "args": []string{"-y", "mcp-remote", url, "--allow-http", "--header", "Authorization:" + auth}}}}, "", "  ")
+	list := []MCPConfig{
+		{"claude_code", "Claude Code", fmt.Sprintf("claude mcp add --transport http healthsync %s --header \"Authorization: %s\"", url, auth)},
+		{"json", "JSON (Cursor, VS Code, Windsurf, …)", string(jsonCfg)},
+		{"stdio_bridge", "Claude Desktop / stdio-only clients", string(remote)},
+		{"agent_prompt", "Instructions for any AI agent", fmt.Sprintf(`Connect to my personal health data through MCP (read-only).
+
+- Server: HealthSync on %s
+- Transport: Streamable HTTP, JSON-RPC 2.0, POST %s
+- Auth header: Authorization: %s
+- Tools: list_data_types, daily_summary, get_records, get_checkups, query_sql
+
+Start with list_data_types to see which Apple Health types exist, then use daily_summary for trends.
+The server is on my home network (plain HTTP); you must run on a machine in the same network or over my VPN.
+This is private health data: only use it to answer my questions.`, serverName, url, auth)},
+	}
+	m := map[string]string{}
+	for _, c := range list {
+		m[c.ID] = c.Text
+	}
+	return MCPConnect{Name: serverName, Token: token, URL: url, Transport: "streamable-http", Configs: m, ConfigList: list}
+}
+
+// handleMCPToken lets a paired device (the iPhone app) mint a separate, revocable token for
+// an AI agent and get ready-to-copy connection configs. POST /mcp/tokens {"name": "..."}
+func (s *Server) handleMCPToken(w http.ResponseWriter, r *http.Request) {
+	device, ok := s.authDevice(r)
+	if !ok {
+		errJSON(w, 401, "bad token")
+		return
+	}
+	var req struct {
+		Name string `json:"name"`
+	}
+	_ = json.NewDecoder(io.LimitReader(r.Body, 1024)).Decode(&req)
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		name = "AI assistant"
+	}
+	if device != "" {
+		name += " (via " + device + ")"
+	}
+	if rr := []rune(name); len(rr) > 80 {
+		name = string(rr[:80])
+	}
+	tok := newToken()
+	if err := s.db.AddDevice(name, tok, clientIP(r)); err != nil {
+		errJSON(w, 500, err.Error())
+		return
+	}
+	s.db.Log(LogEntry{Kind: "pair", Device: name, IP: clientIP(r), OK: true, Message: "MCP token created"})
+	writeJSON(w, 200, mcpConnect(s.cfg.Name, s.baseURL(r)+"/mcp", tok))
+}

@@ -117,10 +117,7 @@
       <p><button class="ghost" id="mcp-token" data-i18n="mcp.create">Create token for an AI assistant</button></p>
       <div id="mcp-setup" hidden>
         <p class="muted" data-i18n="mcp.once">Copy it now, it won't be shown again.</p>
-        <p class="muted">Claude Code</p>
-        <pre class="snippet" id="mcp-cc"></pre>
-        <p class="muted" data-i18n="mcp.other">Other clients (Streamable HTTP)</p>
-        <pre class="snippet" id="mcp-json"></pre>
+        <div id="mcp-configs"></div>
       </div>
       <p class="muted"><span data-i18n="mcp.local">On this computer, desktop apps can also run it over stdio without a token:</span></p>
       <pre class="snippet">{"mcpServers": {"healthsync": {"command": "healthsync-server", "args": ["mcp"]}}}</pre>

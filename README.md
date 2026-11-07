@@ -148,6 +148,8 @@ The app talks to these endpoints; other clients can too.
 | `POST /ingest` | `Authorization: Bearer <token>`. Body: one record per line `type\|start\|end\|value\|unit\|source`, or a JSON array / `{"records":[…]}`, JSON Lines, or CSV/TSV with a header. → `{"ok":true,"received":n,"added":{…}}` |
 | `POST /report` | `{"report":{"id","date","institution","items":[{name,key,value,unit,range,flag}]},"folder":…,"files":[{"name","data"(base64)}]}` |
 | `GET /stats` | counts per type |
+| `POST /mcp` | MCP (Streamable HTTP, JSON responses), Bearer token |
+| `POST /mcp/tokens` | Bearer device token, `{"name":"Claude"}` → a new revocable token for an AI agent plus ready-to-copy configs: `{"url","token","transport","configs":{"claude_code","json","stdio_bridge","agent_prompt"},"config_list":[{"id","title","text"}]}` |
 
 QR codes encode `healthsync://pair?url=<server>&code=<code>&name=<name>`.
 

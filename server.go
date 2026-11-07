@@ -82,6 +82,7 @@ func (s *Server) routes() {
 	m.HandleFunc("POST /mcp", s.handleMCP)
 	m.HandleFunc("GET /mcp", s.handleMCP)
 	m.HandleFunc("DELETE /mcp", s.handleMCP)
+	m.HandleFunc("POST /mcp/tokens", s.handleMCPToken)
 
 	// dashboard
 	sub, _ := fs.Sub(webFS, "web")
@@ -193,7 +194,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, 200, map[string]any{
 		"ok": true, "name": s.cfg.Name, "version": protocolVersion, "os": osTag(),
-		"pair_modes": s.dialogModes(), "stores": stores, "server": "healthsync-server/" + version,
+		"pair_modes": s.dialogModes(), "stores": stores, "server": "healthsync-server/" + version, "mcp": "/mcp",
 	})
 }
 
@@ -528,7 +529,7 @@ func (s *Server) apiNewDevice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.db.Log(LogEntry{Kind: "pair", Device: name, IP: clientIP(r), OK: true, Message: "token created in dashboard"})
-	writeJSON(w, 200, map[string]any{"token": tok, "name": name})
+	writeJSON(w, 200, mcpConnect(s.cfg.Name, s.baseURL(r)+"/mcp", tok))
 }
 
 func (s *Server) apiRevoke(w http.ResponseWriter, r *http.Request) {

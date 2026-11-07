@@ -26,7 +26,7 @@ const ZH = {
   "srv.address": "手机连接地址", "srv.data": "数据目录", "srv.outputs": "存储", "srv.version": "版本", "srv.started": "启动于",
   "srv.pairing": "配对方式", "srv.password": "控制面板密码", "yes": "已设置", "no": "未设置（仅局域网可访问）",
   "ago.s": "刚刚", "ago.m": "{n} 分钟前", "ago.h": "{n} 小时前", "ago.d": "{n} 天前", "copied": "已复制",
-  "unit.records": "条", "dev.shared": "共享令牌",
+  "unit.records": "条", "dev.shared": "共享令牌", "copy": "复制",
   "mcp.title": "AI 助手（MCP）", "mcp.hint": "让 Claude 等支持 MCP 的 AI 助手读取你的健康数据（只读）。给它单独建一个令牌，和设备一样可以在上面撤销。",
   "mcp.create": "为 AI 助手创建令牌", "mcp.once": "现在复制，之后不会再显示。", "mcp.other": "其它客户端（Streamable HTTP）",
   "mcp.local": "在这台电脑上，桌面 App 也可以直接通过 stdio 运行，不需要令牌：",
@@ -40,7 +40,7 @@ const EN_FALLBACK = {
   "ok": "OK", "fail": "Failed", "never": "Never", "none": "Nothing yet.", "types": "types",
   "srv.address": "Address for phones", "srv.data": "Data directory", "srv.outputs": "Storage", "srv.version": "Version", "srv.started": "Started",
   "srv.pairing": "Pairing", "srv.password": "Dashboard password", "yes": "set", "no": "not set (LAN only)",
-  "ago.s": "just now", "ago.m": "{n} min ago", "ago.h": "{n} h ago", "ago.d": "{n} d ago", "copied": "Copied", "unit.records": "", "dev.shared": "shared token",
+  "ago.s": "just now", "ago.m": "{n} min ago", "ago.h": "{n} h ago", "ago.d": "{n} d ago", "copied": "Copied", "unit.records": "", "dev.shared": "shared token", "copy": "Copy",
 };
 function t(key, vars) {
   let s = (lang === "zh" ? ZH[key] : EN_FALLBACK[key]) ?? document.querySelector(`[data-i18n="${key}"]`)?.dataset.en ?? key;
@@ -213,7 +213,7 @@ $("#kind-filter").addEventListener("click", e => {
 $("#more").addEventListener("click", () => loadLogs(false));
 
 // ------------------------------------------------------------------ pairing & devices
-let pairState = null, countdown = null;
+let pairState = null, countdown = null, mcpConfigs = [];
 async function loadPairing() {
   const [p, devs] = await Promise.all([api("/api/pair"), api("/api/devices")]);
   renderPair(p);
@@ -262,11 +262,12 @@ document.addEventListener("click", async e => {
     else if (b.dataset.answer) { await api(`/api/pair/pending/${b.dataset.answer}`, { method: "POST", body: JSON.stringify({ allow: b.dataset.allow === "1" }) }); setTimeout(loadPairing, 500); }
     else if (b.id === "mcp-token") {
       const r = await api("/api/devices", { method: "POST", body: JSON.stringify({ name: "AI assistant" }) });
-      const url = (await api("/api/overview")).mcp_url;
-      $("#mcp-cc").textContent = `claude mcp add --transport http healthsync ${url} --header "Authorization: Bearer ${r.token}"`;
-      $("#mcp-json").textContent = JSON.stringify({ mcpServers: { healthsync: { type: "http", url, headers: { Authorization: `Bearer ${r.token}` } } } }, null, 2);
+      mcpConfigs = r.config_list;
+      $("#mcp-configs").innerHTML = r.config_list.map((c, i) => `<div class="cfg"><div class="cfg-head"><span>${esc(c.title)}</span>
+        <button class="ghost" data-copy="${i}">${t("copy")}</button></div><pre class="snippet">${esc(c.text)}</pre></div>`).join("");
       $("#mcp-setup").hidden = false; loadPairing();
     }
+    else if (b.dataset.copy) { await navigator.clipboard.writeText(mcpConfigs[+b.dataset.copy].text); b.textContent = t("copied"); }
     else if (b.id === "token-show") {
       const code = $("#token");
       if (code.dataset.shown) { code.textContent = "••••••••"; delete code.dataset.shown; b.textContent = t("tok.show"); }
