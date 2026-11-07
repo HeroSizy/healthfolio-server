@@ -7,6 +7,10 @@
   "main": "./cmd/healthsync",
   "out": "build",
   "icon": "assets/icon.png",
+  "updates": {
+    "publicKey": "Lzdz75fri8eR1t/RAJ3h0eQF/RnPD+t+OAfJO6IsajY=",
+    "github": "HeroSizy/healthsync-server"
+  },
   "macos": {
     "minimumSystemVersion": "12.0",
     "infoPlist": {
