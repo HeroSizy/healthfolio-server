@@ -3,6 +3,22 @@
 Releases happen on their own: bump `version` in mygo.json, add its section here, push to
 main. The desktop app shows the section of a new version in its update window.
 
+## 0.0.2
+
+- Turn AI assistant access (MCP) on or off in the app or the dashboard. The change applies
+  at once.
+- MCP prompts: weekly review, checkup review, sleep analysis, compare two periods.
+- MCP resources: database schema, data types, latest checkup, last 7 days, daily values.
+- A HealthSync skill for AI assistants, at `/skill.md`, with an install command in the app.
+- The stdio MCP config uses the app itself, and reads the data folder from Settings.
+- Rename paired devices. The token stays the same.
+- Tailscale: the server sends its Tailscale address to the app and in the QR code, so the
+  iPhone can sync away from home.
+- Fix: old Bonjour adverts no longer stay after the app quits.
+- Settings is at the bottom of the sidebar.
+- Linux: the default data folder is now `~/.local/share/healthsync`.
+- READMEs in English and Simplified Chinese.
+
 ## 0.0.1
 
 First release.
