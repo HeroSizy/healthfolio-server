@@ -285,6 +285,12 @@ func (d *DB) InsertReport(rep Report, folderName, folder string) (int, error) {
 		return 0, err
 	}
 	defer tx.Rollback()
+	// The same report sent again (from another device, or after editing) replaces the old
+	// one: the app derives the id from the original file's hash, so drop the old items first
+	// and items that were renamed or removed don't linger.
+	if _, err := tx.Exec(`DELETE FROM checkup WHERE report_id = ?`, id); err != nil {
+		return 0, err
+	}
 	for _, it := range rep.Items {
 		v := str(it.Value)
 		var num any
