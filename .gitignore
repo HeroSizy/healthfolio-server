@@ -1,0 +1,7 @@
+*.db
+*.db-*
+/build/
+/data/
+/dist/
+/healthsync-server
+/healthsync

@@ -1,0 +1,17 @@
+version: 2
+builds:
+  - env: [CGO_ENABLED=0]
+    goos: [linux, darwin, windows, freebsd]
+    goarch: [amd64, arm64, arm]
+    goarm: ["7"]
+    ignore:
+      - { goos: darwin, goarch: arm }
+      - { goos: windows, goarch: arm }
+    flags: [-trimpath]
+    ldflags: ["-s -w -X github.com/herosizy/healthsync-server/server.version={{.Version}} -X github.com/herosizy/healthsync-server/internal/telemetry.dsn={{.Env.SENTRY_DSN}}"]
+archives:
+  - formats: [tar.gz]
+    format_overrides:
+      - { goos: windows, formats: [zip] }
+    files: [README.md, LICENSE, contrib/**/*]
+checksum: { name_template: checksums.txt }

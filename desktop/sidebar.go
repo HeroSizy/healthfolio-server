@@ -1,0 +1,242 @@
+package desktop
+
+import (
+	_ "embed"
+	"fmt"
+	"image"
+	"image/color"
+	"strconv"
+	"strings"
+
+	"github.com/egoist/mygo/ui"
+	qrcode "github.com/skip2/go-qrcode"
+)
+
+func svgIcon(paths string) *ui.SVG {
+	return ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">` + paths + `</svg>`))
+}
+
+var (
+	iconOverview = svgIcon(`<path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 5-6"/>`)
+	iconHistory  = svgIcon(`<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l3 2"/>`)
+	iconPair     = svgIcon(`<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3h-3zM20 14v.01M14 20h.01M17 20h4v-3"/>`)
+	iconMCP      = svgIcon(`<path d="M12 3l1.9 4.6L18.5 9.5l-4.6 1.9L12 16l-1.9-4.6L5.5 9.5l4.6-1.9z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/>`)
+	iconReports  = svgIcon(`<path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/><path d="M8 14h3l1.5-3 2 6 1.5-3H17"/>`)
+	iconSettings = svgIcon(`<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>`)
+	iconCopy     = svgIcon(`<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>`)
+	_            = ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path fill="#fff" d="M12 20.5s-7.5-4.6-7.5-10.2A4.3 4.3 0 0 1 12 7.6a4.3 4.3 0 0 1 7.5 2.7c0 5.6-7.5 10.2-7.5 10.2z"/></svg>`))
+)
+
+//go:embed icon128.png
+var iconPNG []byte
+
+var appIcon, _ = ui.DecodeBitmap(iconPNG)
+
+type navItem struct {
+	id     string
+	icon   *ui.SVG
+	zh, en string
+}
+
+func (a *App) nav() []navItem {
+	return []navItem{
+		{"overview", iconOverview, "概览", "Overview"},
+		{"history", iconHistory, "同步记录", "Sync History"},
+		{"pair", iconPair, "配对和设备", "Pair & Devices"},
+		{"mcp", iconMCP, "AI 助手", "AI Assistants"},
+		{"reports", iconReports, "体检报告", "Checkups"},
+	}
+}
+
+// settingsNav sits at the bottom of the sidebar, under the server status, as in Kero.
+var settingsNav = navItem{"settings", iconSettings, "设置", "Settings"}
+
+const sidebarW = 220
+
+func (a *App) sidebar(c *ui.Context, pal *palette, bar ui.TitleBar) {
+	ui.Column(c).Width(sidebarW).Shrink(0).Padding(max(bar.Height, 14)+6, 10, 12, 12).Gap(2).DragWindow().Children(func() {
+		// brand
+		ui.Row(c).AlignItems(ui.Center).Gap(10).Padding(4, 6, 14, 6).Children(func() {
+			ui.Image(c, appIcon).Size(30, 30).Radius(8).Shadow(0, 2, 6, 0, pal.accent.Alpha(0.3))
+			ui.Column(c).Gap(0).MinWidth(0).Children(func() {
+				ui.Text(c, "HealthSync").FontSize(14).FontWeight(650).TextColor(pal.text)
+				name := a.ov.Name
+				if name == "" {
+					name = a.t("本地服务器", "Local server")
+				}
+				ui.Text(c, name).FontSize(11).TextColor(pal.textMuted).SingleLine()
+			})
+		})
+		for _, it := range a.nav() {
+			a.navRow(c, pal, it)
+		}
+		ui.Spacer(c)
+		a.status(c, pal)
+		ui.Box(c).Height(6)
+		a.navRow(c, pal, settingsNav)
+	})
+}
+
+func (a *App) navRow(c *ui.Context, pal *palette, it navItem) {
+	sel := a.page == it.id
+	r := ui.ButtonBase(c.Key(it.id)).Height(32).Padding(0, 10).Radius(9).AlignItems(ui.Center).Gap(10).
+		Label(a.t(it.zh, it.en))
+	switch {
+	case sel:
+		r.Background(pal.rowSelected).Border(1, pal.rowBorder).Shadow(0, 1, 3, 0, pal.rowShadow)
+	case r.Hovered():
+		r.Background(pal.rowHover)
+	}
+	r.Children(func() {
+		fg := pal.textMuted
+		if sel {
+			fg = pal.accent
+		}
+		ui.Icon(c, it.icon).Size(16, 16).TextColor(fg)
+		tc := pal.text
+		if !sel {
+			tc = pal.text.Alpha(0.85)
+		}
+		ui.Text(c, a.t(it.zh, it.en)).FontSize(13).FontWeight(map[bool]int{true: 600, false: 500}[sel]).TextColor(tc).Grow(1).SingleLine()
+		switch it.id {
+		case "pair":
+			if n := len(a.pending); n > 0 {
+				ui.Text(c, strconv.Itoa(n)).FontSize(11).FontWeight(600).TextColor(ui.Hex("#ffffff")).
+					Padding(1, 6).Radius(8).Background(pal.accent)
+			}
+		}
+	})
+	if r.Clicked() && a.page != it.id {
+		a.page = it.id
+		if it.id == "settings" {
+			a.resetForm()
+		}
+		a.Refresh()
+	}
+}
+
+// status shows whether the server runs, and where phones reach it.
+func (a *App) status(c *ui.Context, pal *palette) {
+	b, why := a.host.Backend()
+	ui.Column(c).Gap(4).Padding(10, 10).Radius(10).Background(pal.chip).Children(func() {
+		ui.Row(c).AlignItems(ui.Center).Gap(7).Children(func() {
+			dot := pal.ok
+			label := a.t("运行中", "Running")
+			if b == nil {
+				dot, label = pal.danger, a.t("已停止", "Stopped")
+			}
+			d := ui.Box(c).Size(8, 8).Radius(4).Background(dot)
+			if b != nil {
+				// a slow breathing glow while the server listens
+				d.Shadow(0, 0, 6, d.Loop("pulse", 2400_000_000, ui.EaseInOut)*3, dot.Alpha(0.5))
+			}
+			ui.Text(c, label).FontSize(12).FontWeight(600).TextColor(pal.text)
+		})
+		sub := a.ov.BaseURL
+		if b == nil {
+			sub = why
+		}
+		ui.Text(c, strings.TrimPrefix(sub, "http://")).FontSize(11).TextColor(pal.textMuted).MaxLines(2)
+	})
+}
+
+// ---------------------------------------------------------------- helpers
+
+func qrBitmap(text string) *ui.Bitmap {
+	q, err := qrcode.New(text, qrcode.Medium)
+	if err != nil {
+		return nil
+	}
+	q.DisableBorder = true
+	bm := q.Bitmap()
+	n := len(bm)
+	const scale, border = 8, 2
+	size := (n + 2*border) * scale
+	img := image.NewNRGBA(image.Rect(0, 0, size, size))
+	for i := range img.Pix {
+		img.Pix[i] = 255
+	}
+	black := color.NRGBA{A: 255}
+	for y, row := range bm {
+		for x, on := range row {
+			if !on {
+				continue
+			}
+			for dy := 0; dy < scale; dy++ {
+				for dx := 0; dx < scale; dx++ {
+					img.SetNRGBA((x+border)*scale+dx, (y+border)*scale+dy, black)
+				}
+			}
+		}
+	}
+	return ui.NewBitmap(img)
+}
+
+func itoa(n int) string { return strconv.Itoa(n) }
+
+// num formats with thousands separators.
+func num(f float64) string {
+	neg := f < 0
+	if neg {
+		f = -f
+	}
+	var s string
+	if f >= 100 || f == float64(int64(f)) {
+		s = strconv.FormatInt(int64(f+0.5), 10)
+		for i := len(s) - 3; i > 0; i -= 3 {
+			s = s[:i] + "," + s[i:]
+		}
+	} else {
+		s = strconv.FormatFloat(f, 'f', 1, 64)
+		if f < 10 {
+			s = strconv.FormatFloat(f, 'f', 2, 64)
+			s = strings.TrimRight(strings.TrimRight(s, "0"), ".")
+		}
+	}
+	if neg {
+		s = "-" + s
+	}
+	return s
+}
+
+func prettyType(t string) string {
+	for _, p := range []string{"HKQuantityTypeIdentifier", "HKCategoryTypeIdentifier", "HKCorrelationTypeIdentifier", "HKDataTypeIdentifier"} {
+		if strings.HasPrefix(t, p) {
+			return t[len(p):]
+		}
+	}
+	if t == "HKWorkoutTypeIdentifier" {
+		return "Workout"
+	}
+	return t
+}
+
+// typeNames translates the common types for the Chinese UI.
+var typeNames = map[string]string{
+	"StepCount": "步数", "HeartRate": "心率", "RestingHeartRate": "静息心率", "HeartRateVariabilitySDNN": "心率变异性",
+	"ActiveEnergyBurned": "活动能量", "BasalEnergyBurned": "静息能量", "DistanceWalkingRunning": "步行+跑步距离",
+	"FlightsClimbed": "已爬楼层", "SleepAnalysis": "睡眠", "OxygenSaturation": "血氧", "BodyMass": "体重",
+	"BodyFatPercentage": "体脂率", "RespiratoryRate": "呼吸频率", "AppleExerciseTime": "锻炼时间",
+	"AppleStandTime": "站立时间", "MindfulSession": "正念", "Workout": "体能训练", "WalkingSpeed": "步行速度",
+	"BloodPressureSystolic": "收缩压", "BloodPressureDiastolic": "舒张压", "BloodGlucose": "血糖", "VO2Max": "最大摄氧量",
+}
+
+func (a *App) typeLabel(t string) string {
+	p := prettyType(t)
+	if a.zh {
+		if z, ok := typeNames[p]; ok {
+			return z
+		}
+	}
+	return p
+}
+
+func plural(n int, zh bool, zhUnit, en string) string {
+	if zh {
+		return fmt.Sprintf("%s %s", num(float64(n)), zhUnit)
+	}
+	if n == 1 {
+		return "1 " + en
+	}
+	return num(float64(n)) + " " + en + "s"
+}

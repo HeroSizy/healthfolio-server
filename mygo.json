@@ -1,0 +1,22 @@
+{
+  "name": "HealthSync",
+  "identifier": "com.herosizy.healthsync",
+  "version": "0.0.1",
+  "copyright": "Copyright © 2026 HeroSizy",
+  "publisher": "HeroSizy",
+  "main": "./cmd/healthsync",
+  "out": "build",
+  "icon": "assets/icon.png",
+  "updates": {
+    "publicKey": "Lzdz75fri8eR1t/RAJ3h0eQF/RnPD+t+OAfJO6IsajY=",
+    "github": "HeroSizy/healthsync-server"
+  },
+  "macos": {
+    "minimumSystemVersion": "12.0",
+    "infoPlist": {
+      "LSUIElement": false,
+      "NSLocalNetworkUsageDescription": "HealthSync receives health data from your iPhone over the local network.",
+      "NSBonjourServices": ["_healthsync._tcp"]
+    }
+  }
+}

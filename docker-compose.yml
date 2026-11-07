@@ -1,0 +1,18 @@
+services:
+  healthsync:
+    image: ghcr.io/herosizy/healthsync-server:latest
+    # build: .            # or build it yourself
+    restart: unless-stopped
+    # Host networking lets the iPhone find the server via Bonjour and makes the
+    # pairing QR code contain the machine's real LAN address. (Linux only; on
+    # Docker Desktop use the "ports" section and set HEALTHSYNC_PUBLIC_URL.)
+    network_mode: host
+    # ports: ["8787:8787"]
+    volumes:
+      - ./data:/data          # health.db, reports/, token
+    environment:
+      TZ: Asia/Shanghai
+      # HEALTHSYNC_PUBLIC_URL: http://192.168.1.10:8787
+      # HEALTHSYNC_ADMIN_PASSWORD: change-me
+      # HEALTHSYNC_CSV: /data/csv
+      # HEALTHSYNC_DASHBOARD_APPROVAL: "1"   # allow "approve in dashboard" pairing

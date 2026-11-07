@@ -1,0 +1,18 @@
+# systemd unit. Install:
+#   sudo cp healthsync-server /usr/local/bin/
+#   mkdir -p ~/.config/systemd/user && cp healthsync.service ~/.config/systemd/user/
+#   systemctl --user enable --now healthsync
+#   loginctl enable-linger "$USER"     # keep running when you're logged out
+[Unit]
+Description=HealthSync server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/local/bin/healthsync-server serve
+Restart=always
+RestartSec=5
+# Environment=HEALTHSYNC_ADMIN_PASSWORD=change-me
+
+[Install]
+WantedBy=default.target
