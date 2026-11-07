@@ -40,6 +40,8 @@ type Host interface {
 	// Backend is the running server, or nil with the reason it isn't running.
 	Backend() (Backend, string)
 	DefaultDataDir() string
+	// StdioCommand is the executable an AI assistant runs with "mcp" for stdio.
+	StdioCommand() string
 	Copy(text string)
 	OpenURL(url string)
 	// ChooseFolder asks for a folder and calls done with it ("" if cancelled), on any goroutine.

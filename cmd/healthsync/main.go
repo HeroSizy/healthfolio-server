@@ -40,7 +40,14 @@ func main() {
 		case "headless":
 			cli.Main(args[1:])
 			return
-		case "serve", "pair", "token", "stats", "mcp", "version", "help", "h":
+		case "pair", "token", "stats", "mcp":
+			// read the database in the data folder chosen in Settings, unless -data is given
+			if dir := loadSettings().DataDir; dir != "" && !hasFlag(args[1:], "data") && os.Getenv("HEALTHSYNC_DATA") == "" {
+				args = append([]string{args[0], "-data", dir}, args[1:]...)
+			}
+			cli.Main(args)
+			return
+		case "serve", "version", "help", "h":
 			cli.Main(args)
 			return
 		}
@@ -345,6 +352,30 @@ func settingsPath() string {
 		dir = "."
 	}
 	return filepath.Join(dir, "HealthSync", "settings.json")
+}
+
+// hasFlag reports whether args set -name or --name.
+func hasFlag(args []string, name string) bool {
+	for _, a := range args {
+		a = strings.TrimLeft(a, "-")
+		if a == name || strings.HasPrefix(a, name+"=") {
+			return true
+		}
+	}
+	return false
+}
+
+// StdioCommand is how an AI assistant on this computer starts MCP over stdio: this app's
+// own executable with "mcp".
+func (h *host) StdioCommand() string {
+	exe, err := os.Executable()
+	if err != nil {
+		return "healthsync-server"
+	}
+	if p, err := filepath.EvalSymlinks(exe); err == nil {
+		exe = p
+	}
+	return exe
 }
 
 func loadSettings() model.Settings {

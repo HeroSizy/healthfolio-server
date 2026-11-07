@@ -146,10 +146,13 @@ func (s *Sample) NewMCPToken(name string) (model.MCPConnect, error) {
 func (s *Sample) DashboardURL() string { return "http://127.0.0.1:8787/" }
 
 // Host
-func (s *Sample) Settings() model.Settings                    { return s.settings }
-func (s *Sample) SaveSettings(v model.Settings) error         { s.settings = v; return nil }
-func (s *Sample) Backend() (Backend, string)                  { return s, "" }
-func (s *Sample) DefaultDataDir() string                      { return "~/Library/Application Support/HealthSync" }
+func (s *Sample) Settings() model.Settings            { return s.settings }
+func (s *Sample) SaveSettings(v model.Settings) error { s.settings = v; return nil }
+func (s *Sample) Backend() (Backend, string)          { return s, "" }
+func (s *Sample) DefaultDataDir() string              { return "~/Library/Application Support/HealthSync" }
+func (s *Sample) StdioCommand() string {
+	return "/Applications/HealthSync.app/Contents/MacOS/HealthSync"
+}
 func (s *Sample) Copy(string)                                 {}
 func (s *Sample) OpenURL(string)                              {}
 func (s *Sample) ChooseFolder(_, _ string, done func(string)) { done("/Volumes/T7/HealthSync") }

@@ -1,6 +1,7 @@
 package desktop
 
 import (
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -535,8 +536,9 @@ func (a *App) mcpPage(c *ui.Context, pal *palette) {
 					a.copyBlock(c, pal, i, firstNonEmpty(titles[cfg.ID], cfg.Title), cfg.Text)
 				}
 			}
-			a.copyBlock(c, pal, 99, a.t("本机 stdio（不需要令牌）", "On this computer, over stdio (no token)"),
-				`{"mcpServers": {"healthsync": {"command": "healthsync-server", "args": ["mcp"]}}}`)
+			cmd, _ := json.Marshal(a.host.StdioCommand())
+			a.copyBlock(c, pal, 99, a.t("本机 stdio（不需要令牌，用的就是这个 App，不用另外安装）", "On this computer, over stdio (no token; uses this app, nothing else to install)"),
+				`{"mcpServers": {"healthsync": {"command": `+string(cmd)+`, "args": ["mcp"]}}}`)
 			a.group(c, pal, a.t("提示词、资源和 Skill", "Prompts, resources and skill"), "", func() {
 				ui.Text(c, a.t("连上后，AI 助手里可以直接选这些提示词：每周健康回顾、体检报告解读、睡眠分析、两个时间段对比。也能读取数据库结构、最新体检、近 7 天概况等资源。",
 					"Once connected, the assistant offers these prompts: weekly review, checkup review, sleep analysis, compare two periods. It can also read resources such as the database schema, the latest checkup and the last 7 days.")).
