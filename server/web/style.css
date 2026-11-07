@@ -30,7 +30,7 @@ h2 { font-size: 16px; }
 }
 @media (max-width: 760px) { .top { position: static; } }
 .brand { display: flex; gap: 12px; align-items: center; min-width: 0; }
-.logo { width: 36px; height: 36px; border-radius: 9px; flex: none; background: var(--accent) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M16 24s-7-4.4-7-9.2A3.8 3.8 0 0 1 16 12a3.8 3.8 0 0 1 7 2.8C23 19.6 16 24 16 24z' fill='%23fff'/%3E%3C/svg%3E") center/100% no-repeat; }
+.logo { width: 36px; height: 36px; border-radius: 9px; flex: none; background: url("icon.svg") center/100% no-repeat; box-shadow: 0 0 0 1px rgba(0,0,0,.08), 0 1px 3px rgba(0,0,0,.12); }
 .tabs { display: flex; gap: 4px; overflow-x: auto; max-width: 100%; }
 .tabs button, .seg button {
   border: 0; background: none; color: var(--muted); font: inherit; padding: 7px 12px; border-radius: 999px; cursor: pointer; white-space: nowrap;
