@@ -15,7 +15,7 @@ SQLite 数据库里。它是一个二进制文件，或一个 Docker 镜像。�
 
   桌面 App 在窗口里显示控制面板。无界面服务器在浏览器里显示控制面板。
 - **扫码配对。** 点击 **配对新的 iPhone**。用 iPhone 相机扫二维码。每台配对的设备有自己的令牌。
-  你可以在控制面板里撤销令牌。
+  你可以在控制面板里重命名设备，或撤销它的令牌。
 - **自动发现。** 服务器用 Bonjour（mDNS）广播 `_healthsync._tcp`。App 在你的 Wi-Fi 网络里找到
   服务器。你不用输入地址。
 - **普通 SQLite 数据。** 数据在 `records` 表和 `daily` 视图里。你可以用 `sqlite3`、Datasette、
@@ -267,6 +267,44 @@ stdio 连接直接读取 `health.db`。它不需要令牌。
 
 **注意：** AI 助手会把它读到的数据发给它的模型提供商。
 
+### 打开或关闭 AI 助手访问
+
+AI 助手访问默认打开。要关闭它，使用桌面 App **AI 助手** 页面上的开关，或网页控制面板
+**AI 助手（MCP）** 部分的开关。更改立即对 HTTP 和 stdio 生效。服务器保留令牌。重新打开后，令牌
+可以再次使用。
+
+### 提示词和资源
+
+服务器给 AI 助手提供这些提示词：
+
+| 提示词 | 说明 |
+|---|---|
+| `weekly_review` | 回顾最近 7 天，并和之前 4 周比较。 |
+| `checkup_review` | 解读一份体检报告，以及和以前报告相比的变化。 |
+| `sleep_analysis` | 分析睡眠时长、时间和睡眠阶段。 |
+| `compare_periods` | 比较两个时间段的指标。 |
+
+服务器也提供这些资源：
+
+- `healthsync://schema`：表、视图和列。
+- `healthsync://data-types`：数据类型，以及数量、单位和日期。
+- `healthsync://checkups/latest`：最新的体检报告。
+- `healthsync://summary/7d`：最近 7 天的主要指标。
+- `healthsync://daily/{type}`：一种数据类型最近 30 天的数据。
+- `healthsync://skill`：HealthSync skill。
+
+### Skill
+
+Skill 告诉 AI 助手怎么查询你的数据。要安装到 Claude Code，运行：
+
+```sh
+mkdir -p ~/.claude/skills/healthsync && \
+  curl -fsSL http://<这台电脑>:8787/skill.md -o ~/.claude/skills/healthsync/SKILL.md
+```
+
+用于其它客户端时，在桌面 App 里复制 `SKILL.md`，或在控制面板里打开 `/skill.md`。源文件是
+[server/skill/SKILL.md](server/skill/SKILL.md)。
+
 ## 数据库
 
 ```sql
@@ -290,13 +328,16 @@ App 使用下面的接口。其它客户端也可以使用。
 
 | 接口 | 说明 |
 |---|---|
-| `GET /health` | 返回 `{"ok":true,"name":…,"version":2,"records":2,"os":…,"pair_modes":[…],"mcp":"/mcp","urls":{…}}`。`"records": 2` 表示 `/ingest` 保存完整的 JSON Lines 记录，并接受删除。见 [完整记录](#完整记录)。 |
+| `GET /health` | 返回 `{"ok":true,"name":…,"version":2,"records":2,"os":…,"pair_modes":[…],"mcp":"/mcp","mcp_enabled":true,"urls":{…}}`。AI 助手访问关闭时，没有 `mcp`，`mcp_enabled` 是 `false`。`"records": 2` 表示 `/ingest` 保存完整的 JSON Lines 记录，并接受删除。见 [完整记录](#完整记录)。 |
 | `POST /pair` | 发送 `{"device":"…","code":"123456"}`。返回 `{"token":…}`。没有配对码时，服务器返回 `428` 和 `needs_code`，或者等待批准（macOS 对话框或控制面板）。 |
 | `POST /ingest` | 发送 `Authorization: Bearer <token>`。请求体是下面的一种：每行一条记录 `type\|start\|end\|value\|unit\|source`；JSON 数组；`{"records":[…],"deleted":["uuid",…]}`；JSON Lines；带表头的 CSV 或 TSV。返回 `{"ok":true,"received":n,"added":{…},"deleted":n}`。 |
 | `POST /report` | 发送 `{"report":{"id","date","institution","items":[{name,key,value,unit,range,flag}]},"folder":…,"files":[{"name","data"(base64)}]}`。 |
 | `GET /stats` | 返回每种类型的记录数。 |
 | `POST /mcp` | MCP（Streamable HTTP，JSON 响应）。发送 Bearer 令牌。 |
-| `POST /mcp/tokens` | 发送设备的 Bearer 令牌和 `{"name":"Claude"}`。返回给 AI 助手的新令牌和可以复制的配置：`{"url","token","transport","configs":{"claude_code","json","stdio_bridge","agent_prompt"},"config_list":[{"id","title","text"}]}`。你可以撤销这个令牌。 |
+| `POST /mcp/tokens` | 发送设备的 Bearer 令牌和 `{"name":"Claude"}`。返回给 AI 助手的新令牌和可以复制的配置：`{"url","token","transport","configs":{"claude_code","json","stdio_bridge","agent_prompt"},"config_list":[{"id","title","text"}]}`。你可以撤销这个令牌。AI 助手访问关闭时返回 `403`。 |
+| `GET /skill.md` | 返回给 AI 助手的 HealthSync skill。 |
+| `PATCH /api/devices/{id}` | 控制面板用。发送 `{"name":"…"}` 来重命名设备。令牌不变。 |
+| `POST /api/mcp` | 控制面板用。发送 `{"enabled":true}` 或 `{"enabled":false}` 来打开或关闭 AI 助手访问。 |
 
 二维码的内容是 `healthsync://pair?url=<server>&code=<code>&name=<name>`。如果服务器有 Tailscale
 地址，二维码里还有 `alt=<地址>`。

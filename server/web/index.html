@@ -113,7 +113,10 @@
     </div>
 
     <div class="card">
-      <div class="card-head"><h2 data-i18n="mcp.title">AI assistants (MCP)</h2></div>
+      <div class="card-head"><h2 data-i18n="mcp.title">AI assistants (MCP)</h2>
+        <label class="switch"><input type="checkbox" id="mcp-on"> <span data-i18n="mcp.on">Allow AI assistants</span></label></div>
+      <p class="muted" id="mcp-off" hidden data-i18n="mcp.offHint">Turned off: no assistant can connect. Tokens are kept and work again when you turn it back on.</p>
+      <div id="mcp-body">
       <p class="muted" data-i18n="mcp.hint">Let Claude or another MCP client read your health data (read-only). Create a token for it; you can revoke it above like any device.</p>
       <p><button class="ghost" id="mcp-token" data-i18n="mcp.create">Create token for an AI assistant</button></p>
       <div id="mcp-setup" hidden>
@@ -122,6 +125,10 @@
       </div>
       <p class="muted"><span data-i18n="mcp.local">On this computer, desktop apps can also run it over stdio without a token:</span></p>
       <pre class="snippet">{"mcpServers": {"healthsync": {"command": "healthsync-server", "args": ["mcp"]}}}</pre>
+      <p class="muted" data-i18n="mcp.extras">Once connected, the assistant offers prompts (weekly review, checkup review, sleep analysis, compare two periods) and resources (database schema, latest checkup, last 7 days).</p>
+      <p class="muted"><span data-i18n="mcp.skill">The skill tells the assistant how to query your data. Install it in Claude Code:</span> <a href="/skill.md" target="_blank">SKILL.md</a></p>
+      <pre class="snippet" id="skill-cmd"></pre>
+      </div>
     </div>
   </section>
 

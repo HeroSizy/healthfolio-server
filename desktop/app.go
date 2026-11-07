@@ -19,6 +19,8 @@ type Backend interface {
 	RevokeDevice(id int64) error
 	DeleteDevice(id int64) error
 	RenameDevice(id int64, name string) error
+	SetMCPEnabled(on bool) error
+	SkillMD() string
 	Reports() ([]model.ReportRow, error)
 	Daily(typ string, days int) ([]model.DailyPoint, error)
 	NewPairCode() (model.PairInfo, error)
@@ -65,7 +67,7 @@ type App struct {
 	devices    []model.Device
 	renaming   int64 // the device whose name is being edited, or 0
 	renameText string
-	reports   []model.ReportRow
+	reports    []model.ReportRow
 	pair       *model.PairInfo
 	pairQR     *ui.Bitmap
 	pending    []model.PendingPair

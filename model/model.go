@@ -104,6 +104,7 @@ type Overview struct {
 	LastSync     *LogEntry  `json:"last_sync"`
 	PairModes    []string   `json:"pair_modes"`
 	Password     bool       `json:"password"`
+	MCPEnabled   bool       `json:"mcp_enabled"`
 }
 
 // PairInfo is an active one-time pairing code and the link its QR code encodes.

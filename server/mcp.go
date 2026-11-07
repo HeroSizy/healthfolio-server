@@ -116,6 +116,10 @@ func (m *MCP) Handle(raw []byte) *rpcResp {
 		return nil
 	}
 	resp := &rpcResp{JSONRPC: "2.0", ID: req.ID}
+	if req.Method != "ping" && !mcpEnabled(m.db) {
+		resp.Error = &rpcErr{-32001, mcpOffMessage}
+		return resp
+	}
 	switch req.Method {
 	case "initialize":
 		var p struct {
@@ -128,7 +132,7 @@ func (m *MCP) Handle(raw []byte) *rpcResp {
 		}
 		resp.Result = map[string]any{
 			"protocolVersion": v,
-			"capabilities":    map[string]any{"tools": map[string]any{}},
+			"capabilities":    map[string]any{"tools": map[string]any{}, "prompts": map[string]any{}, "resources": map[string]any{}},
 			"serverInfo":      map[string]any{"name": "healthsync", "title": "HealthSync", "version": version},
 			"instructions": "Personal Apple Health data synced from the user's iPhone, plus medical checkup results. " +
 				"Start with list_data_types. Times are ISO 8601 with the phone's time zone. This is the user's private health data: " +
@@ -154,6 +158,35 @@ func (m *MCP) Handle(raw []byte) *rpcResp {
 		}
 		b, _ := json.Marshal(out)
 		resp.Result = map[string]any{"content": []any{map[string]any{"type": "text", "text": string(b)}}}
+	case "prompts/list":
+		resp.Result = map[string]any{"prompts": mcpPrompts}
+	case "prompts/get":
+		var p struct {
+			Name      string            `json:"name"`
+			Arguments map[string]string `json:"arguments"`
+		}
+		_ = json.Unmarshal(req.Params, &p)
+		out, err := getPrompt(p.Name, p.Arguments)
+		if err != nil {
+			resp.Error = &rpcErr{-32602, err.Error()}
+			break
+		}
+		resp.Result = out
+	case "resources/list":
+		resp.Result = map[string]any{"resources": mcpResources}
+	case "resources/templates/list":
+		resp.Result = map[string]any{"resourceTemplates": mcpResourceTemplates}
+	case "resources/read":
+		var p struct {
+			URI string `json:"uri"`
+		}
+		_ = json.Unmarshal(req.Params, &p)
+		out, err := m.readResource(p.URI)
+		if err != nil {
+			resp.Error = &rpcErr{-32002, err.Error()}
+			break
+		}
+		resp.Result = map[string]any{"contents": []any{out}}
 	default:
 		resp.Error = &rpcErr{-32601, "method not found: " + req.Method}
 	}
@@ -280,6 +313,10 @@ func (s *Server) handleMCP(w http.ResponseWriter, r *http.Request) {
 		errJSON(w, 401, "bad token")
 		return
 	}
+	if !s.db.MCPEnabled() {
+		errJSON(w, 403, mcpOffMessage)
+		return
+	}
 	if r.Method != http.MethodPost { // stateless: no server-initiated stream, no sessions
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
@@ -350,7 +387,11 @@ func RunMCPStdio(cfg *Config) error {
 	if err != nil {
 		return err
 	}
+	on := db.MCPEnabled()
 	db.Close()
+	if !on {
+		return fmt.Errorf("%s", mcpOffMessage)
+	}
 	m, err := OpenMCP(p)
 	if err != nil {
 		return err
@@ -398,6 +439,10 @@ func (s *Server) handleMCPToken(w http.ResponseWriter, r *http.Request) {
 	device, ok := s.authDevice(r)
 	if !ok {
 		errJSON(w, 401, "bad token")
+		return
+	}
+	if !s.db.MCPEnabled() {
+		errJSON(w, 403, mcpOffMessage)
 		return
 	}
 	var req struct {

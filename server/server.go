@@ -96,6 +96,12 @@ func (s *Server) routes() {
 	m.HandleFunc("GET /mcp", s.handleMCP)
 	m.HandleFunc("DELETE /mcp", s.handleMCP)
 	m.HandleFunc("POST /mcp/tokens", s.handleMCPToken)
+	m.HandleFunc("GET /skill.md", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+		w.Header().Set("Content-Disposition", `inline; filename="SKILL.md"`)
+		_, _ = io.WriteString(w, skillMD)
+	})
+	m.HandleFunc("POST /api/mcp", s.admin(s.apiSetMCP))
 
 	// dashboard
 	sub, _ := fs.Sub(webFS, "web")
@@ -206,11 +212,15 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	if s.hook != nil {
 		stores = append(stores, "hook")
 	}
-	writeJSON(w, 200, map[string]any{
+	out := map[string]any{
 		"ok": true, "name": s.cfg.Name, "version": protocolVersion, "os": osTag(),
-		"pair_modes": s.dialogModes(), "stores": stores, "server": "healthsync-server/" + version, "mcp": "/mcp",
-		"records": recordsVersion, "urls": s.urls(r),
-	})
+		"pair_modes": s.dialogModes(), "stores": stores, "server": "healthsync-server/" + version,
+		"records": recordsVersion, "urls": s.urls(r), "mcp_enabled": s.db.MCPEnabled(),
+	}
+	if s.db.MCPEnabled() {
+		out["mcp"] = "/mcp"
+	}
+	writeJSON(w, 200, out)
 }
 
 func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
@@ -477,7 +487,7 @@ func (s *Server) overview(base string) model.Overview {
 		Name: s.cfg.Name, Version: version, Protocol: protocolVersion, OS: osTag(),
 		Started: s.started.Format(time.RFC3339), BaseURL: base, TailscaleURL: TailscaleURL(s.cfg.Port), MCPURL: base + "/mcp", DataDir: s.cfg.DataDir,
 		Outputs: outputs, Stats: st, Activity: act, Devices: active, Reports: len(reps),
-		PairModes: s.dialogModes(), Password: s.cfg.AdminPassword != "",
+		PairModes: s.dialogModes(), Password: s.cfg.AdminPassword != "", MCPEnabled: s.db.MCPEnabled(),
 	}
 	if len(last) > 0 {
 		o.LastSync = &last[0]
@@ -578,6 +588,34 @@ func (s *Server) apiRevoke(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, map[string]any{"ok": true})
+}
+
+// apiSetMCP turns AI assistant access on or off: {"enabled": true|false}.
+func (s *Server) apiSetMCP(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Enabled *bool `json:"enabled"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1024)).Decode(&req); err != nil || req.Enabled == nil {
+		errJSON(w, 400, `send {"enabled": true} or {"enabled": false}`)
+		return
+	}
+	if err := s.setMCP(*req.Enabled, "dashboard"); err != nil {
+		errJSON(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"ok": true, "enabled": *req.Enabled})
+}
+
+func (s *Server) setMCP(on bool, where string) error {
+	if err := s.db.SetMCPEnabled(on); err != nil {
+		return err
+	}
+	msg := "AI assistant access turned off in the " + where
+	if on {
+		msg = "AI assistant access turned on in the " + where
+	}
+	s.db.Log(LogEntry{Kind: "pair", OK: true, Message: msg})
+	return nil
 }
 
 // apiRenameDevice takes {"name":"…"}.

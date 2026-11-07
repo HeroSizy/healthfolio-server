@@ -18,7 +18,8 @@ It does not use a cloud service. It does not need an account.
   The desktop app shows the dashboard in its window. The headless server shows it in a web
   browser.
 - **Pairing with a QR code.** Click **Pair a new iPhone**. Scan the QR code with the iPhone
-  camera. Each paired device gets its own token. You can revoke a token in the dashboard.
+  camera. Each paired device gets its own token. You can rename a device or revoke its token
+  in the dashboard.
 - **Discovery.** The server announces `_healthsync._tcp` with Bonjour (mDNS). The app finds
   the server on your Wi-Fi network. You do not type an address.
 - **Plain SQLite data.** The data is in the `records` table and the `daily` view. You can read
@@ -287,6 +288,45 @@ The stdio connection reads `health.db` directly. It does not need a token.
 
 **Caution:** The AI assistant sends the data that it reads to its model provider.
 
+### Turn AI assistant access on or off
+
+AI assistant access is on by default. To turn it off, use the switch on the **AI Assistants**
+page of the desktop app, or in the **AI assistants (MCP)** section of the web dashboard. The
+change applies immediately to HTTP and stdio. The server keeps the tokens. When you turn
+access on again, the tokens work again.
+
+### Prompts and resources
+
+The server gives these prompts to the AI assistant:
+
+| Prompt | Description |
+|---|---|
+| `weekly_review` | Reviews the last 7 days and compares them with the 4 weeks before. |
+| `checkup_review` | Explains a checkup report and the changes since earlier reports. |
+| `sleep_analysis` | Analyzes sleep duration, timing and stages. |
+| `compare_periods` | Compares metrics between two periods. |
+
+The server also gives these resources:
+
+- `healthsync://schema`: the tables, views and columns.
+- `healthsync://data-types`: the data types with counts, units and dates.
+- `healthsync://checkups/latest`: the most recent checkup report.
+- `healthsync://summary/7d`: the main metrics for the last 7 days.
+- `healthsync://daily/{type}`: the last 30 days of one data type.
+- `healthsync://skill`: the HealthSync skill.
+
+### Skill
+
+The skill tells the AI assistant how to query your data. To install it in Claude Code, run:
+
+```sh
+mkdir -p ~/.claude/skills/healthsync && \
+  curl -fsSL http://<this-computer>:8787/skill.md -o ~/.claude/skills/healthsync/SKILL.md
+```
+
+For other clients, copy `SKILL.md` from the desktop app or open `/skill.md` in the dashboard.
+The source is [server/skill/SKILL.md](server/skill/SKILL.md).
+
 ## Database
 
 ```sql
@@ -310,13 +350,16 @@ The app uses these endpoints. Other clients can use them too.
 
 | Endpoint | Description |
 |---|---|
-| `GET /health` | Returns `{"ok":true,"name":…,"version":2,"records":2,"os":…,"pair_modes":[…],"mcp":"/mcp","urls":{…}}`. `"records": 2` means that `/ingest` keeps the full JSON Lines records and accepts deletions. Refer to [Full records](#full-records). |
+| `GET /health` | Returns `{"ok":true,"name":…,"version":2,"records":2,"os":…,"pair_modes":[…],"mcp":"/mcp","mcp_enabled":true,"urls":{…}}`. When AI assistant access is off, `mcp` is not there and `mcp_enabled` is `false`. `"records": 2` means that `/ingest` keeps the full JSON Lines records and accepts deletions. Refer to [Full records](#full-records). |
 | `POST /pair` | Send `{"device":"…","code":"123456"}`. Returns `{"token":…}`. Without a code, the server returns `428` and `needs_code`, or it waits for approval (macOS dialog or dashboard). |
 | `POST /ingest` | Send `Authorization: Bearer <token>`. The body is one of: one record on each line as `type\|start\|end\|value\|unit\|source`; a JSON array; `{"records":[…],"deleted":["uuid",…]}`; JSON Lines; CSV or TSV with a header. Returns `{"ok":true,"received":n,"added":{…},"deleted":n}`. |
 | `POST /report` | Send `{"report":{"id","date","institution","items":[{name,key,value,unit,range,flag}]},"folder":…,"files":[{"name","data"(base64)}]}`. |
 | `GET /stats` | Returns the number of records for each type. |
 | `POST /mcp` | MCP (Streamable HTTP, JSON responses). Send a Bearer token. |
-| `POST /mcp/tokens` | Send a Bearer device token and `{"name":"Claude"}`. Returns a new token for an AI agent and configurations to copy: `{"url","token","transport","configs":{"claude_code","json","stdio_bridge","agent_prompt"},"config_list":[{"id","title","text"}]}`. You can revoke the token. |
+| `POST /mcp/tokens` | Send a Bearer device token and `{"name":"Claude"}`. Returns a new token for an AI agent and configurations to copy: `{"url","token","transport","configs":{"claude_code","json","stdio_bridge","agent_prompt"},"config_list":[{"id","title","text"}]}`. You can revoke the token. Returns `403` when AI assistant access is off. |
+| `GET /skill.md` | Returns the HealthSync skill for AI assistants. |
+| `PATCH /api/devices/{id}` | Dashboard. Send `{"name":"…"}` to rename a device. The token does not change. |
+| `POST /api/mcp` | Dashboard. Send `{"enabled":true}` or `{"enabled":false}` to turn AI assistant access on or off. |
 
 A QR code contains `healthsync://pair?url=<server>&code=<code>&name=<name>`. If the server
 has a Tailscale address, the QR code also contains `alt=<address>`.

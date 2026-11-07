@@ -93,9 +93,11 @@ func (in *Instance) Overview() model.Overview { return in.srv.overview(in.Cfg.Ba
 func (in *Instance) Logs(limit int, before int64, kind string) ([]model.LogEntry, error) {
 	return in.db.Logs(limit, before, kind)
 }
-func (in *Instance) Devices() ([]model.Device, error)    { return in.db.Devices() }
-func (in *Instance) RevokeDevice(id int64) error         { return in.db.RevokeDevice(id) }
-func (in *Instance) DeleteDevice(id int64) error         { return in.db.DeleteDevice(id) }
+func (in *Instance) Devices() ([]model.Device, error) { return in.db.Devices() }
+func (in *Instance) RevokeDevice(id int64) error      { return in.db.RevokeDevice(id) }
+func (in *Instance) DeleteDevice(id int64) error      { return in.db.DeleteDevice(id) }
+func (in *Instance) SetMCPEnabled(on bool) error      { return in.srv.setMCP(on, "app") }
+func (in *Instance) SkillMD() string                  { return skillMD }
 func (in *Instance) RenameDevice(id int64, name string) error {
 	return in.db.RenameDevice(id, name)
 }

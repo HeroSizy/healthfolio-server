@@ -50,7 +50,30 @@ CREATE TABLE IF NOT EXISTS devices (
     created TEXT NOT NULL, last_seen TEXT, last_ip TEXT, revoked INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS reports (
     id TEXT PRIMARY KEY, date TEXT, institution TEXT, items INTEGER, folder TEXT, received TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS prefs (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 `
+
+// MCPEnabled reports whether AI assistants may connect. It is on unless turned off in the
+// app or the dashboard.
+func (d *DB) MCPEnabled() bool { return mcpEnabled(d.sql) }
+
+func mcpEnabled(db *sql.DB) bool {
+	var v string
+	_ = db.QueryRow(`SELECT value FROM prefs WHERE key = 'mcp_disabled'`).Scan(&v)
+	return v != "1"
+}
+
+// SetMCPEnabled turns MCP on or off at once, for HTTP and stdio.
+func (d *DB) SetMCPEnabled(on bool) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	v := "1"
+	if on {
+		v = "0"
+	}
+	_, err := d.sql.Exec(`INSERT INTO prefs (key, value) VALUES ('mcp_disabled', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value`, v)
+	return err
+}
 
 func OpenDB(path string) (*DB, error) {
 	// WAL + busy timeout so other tools (sqlite3, Datasette, scripts) can read while we write.

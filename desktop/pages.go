@@ -489,6 +489,23 @@ func (a *App) mcpPage(c *ui.Context, pal *palette) {
 	a.header(c, pal, a.t("AI 助手（MCP）", "AI Assistants (MCP)"), a.t("让 Claude 等 AI 助手只读查询你的健康数据", "Let Claude and other assistants read your health data"), nil)
 	ui.Scroll(c).Grow(1).MinHeight(0).Children(func() {
 		ui.Column(c).Padding(4, 22, 22, 22).Gap(16).Children(func() {
+			on := a.ov.MCPEnabled
+			a.group(c, pal, a.t("访问权限", "Access"), "", func() {
+				sub := a.t("关掉后，所有 AI 助手都连不上，令牌保留，重新打开就能用", "When off, no assistant can connect. Tokens are kept and work again when you turn it back on")
+				a.settingRow(c, pal, a.t("允许 AI 助手读取健康数据", "Let AI assistants read health data"), sub, func() {
+					if toggle(c, &on, pal).Changed() && b != nil {
+						if err := b.SetMCPEnabled(on); err != nil {
+							a.toast = err.Error()
+						}
+						a.ov.MCPEnabled = on
+						a.mcp = nil
+						a.Refresh()
+					}
+				})
+			})
+			if !on {
+				return
+			}
 			ui.Row(c).Gap(16).AlignItems(ui.Center).Padding(18).Radius(14).Background(pal.inset).Children(func() {
 				ui.Column(c).Grow(1).Gap(6).Children(func() {
 					ui.Text(c, a.t("连接一个 AI 助手", "Connect an AI assistant")).FontSize(15).FontWeight(650)
@@ -520,6 +537,23 @@ func (a *App) mcpPage(c *ui.Context, pal *palette) {
 			}
 			a.copyBlock(c, pal, 99, a.t("本机 stdio（不需要令牌）", "On this computer, over stdio (no token)"),
 				`{"mcpServers": {"healthsync": {"command": "healthsync-server", "args": ["mcp"]}}}`)
+			a.group(c, pal, a.t("提示词、资源和 Skill", "Prompts, resources and skill"), "", func() {
+				ui.Text(c, a.t("连上后，AI 助手里可以直接选这些提示词：每周健康回顾、体检报告解读、睡眠分析、两个时间段对比。也能读取数据库结构、最新体检、近 7 天概况等资源。",
+					"Once connected, the assistant offers these prompts: weekly review, checkup review, sleep analysis, compare two periods. It can also read resources such as the database schema, the latest checkup and the last 7 days.")).
+					FontSize(12).TextColor(pal.textMuted)
+				ui.Text(c, a.t("Skill 告诉 AI 助手怎么查你的数据。用下面的命令装到 Claude Code：", "The skill tells the assistant how to query your data. Install it in Claude Code with this command:")).
+					FontSize(12).TextColor(pal.textMuted)
+			})
+			a.copyBlock(c, pal, 100, "Claude Code skill",
+				"mkdir -p ~/.claude/skills/healthsync && curl -fsSL "+strings.TrimSuffix(a.ov.MCPURL, "/mcp")+"/skill.md -o ~/.claude/skills/healthsync/SKILL.md")
+			if b != nil {
+				a.settingRow(c, pal, "SKILL.md", a.t("用于 Claude.ai、Claude Desktop 等其它客户端：复制后新建一个 skill", "For Claude.ai, Claude Desktop and other clients: copy it into a new skill"), func() {
+					if ui.Button(c, a.t("复制 SKILL.md", "Copy SKILL.md")).Clicked() {
+						a.host.Copy(b.SkillMD())
+						a.toast = a.t("已复制", "Copied")
+					}
+				})
+			}
 		})
 	})
 }

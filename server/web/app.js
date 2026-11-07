@@ -30,6 +30,9 @@ const ZH = {
   "mcp.title": "AI 助手（MCP）", "mcp.hint": "让 Claude 等支持 MCP 的 AI 助手读取你的健康数据（只读）。给它单独建一个令牌，和设备一样可以在上面撤销。",
   "mcp.create": "为 AI 助手创建令牌", "mcp.once": "现在复制，之后不会再显示。", "mcp.other": "其它客户端（Streamable HTTP）",
   "mcp.local": "在这台电脑上，桌面 App 也可以直接通过 stdio 运行，不需要令牌：",
+  "mcp.on": "允许 AI 助手", "mcp.offHint": "已关闭：所有 AI 助手都连不上。令牌保留，重新打开就能用。",
+  "mcp.extras": "连上后，AI 助手里可以直接选这些提示词：每周健康回顾、体检报告解读、睡眠分析、两个时间段对比；也能读取数据库结构、最新体检、近 7 天概况等资源。",
+  "mcp.skill": "Skill 告诉 AI 助手怎么查你的数据。用下面的命令装到 Claude Code：",
 };
 const lang = (navigator.language || "en").toLowerCase().startsWith("zh") ? "zh" : "en";
 const EN_FALLBACK = {
@@ -214,9 +217,21 @@ $("#more").addEventListener("click", () => loadLogs(false));
 
 // ------------------------------------------------------------------ pairing & devices
 let pairState = null, countdown = null, mcpConfigs = [];
+function renderMCP(on) {
+  $("#mcp-on").checked = on;
+  $("#mcp-off").hidden = on;
+  $("#mcp-body").hidden = !on;
+  $("#skill-cmd").textContent = `mkdir -p ~/.claude/skills/healthsync && curl -fsSL ${location.origin}/skill.md -o ~/.claude/skills/healthsync/SKILL.md`;
+}
+$("#mcp-on").addEventListener("change", async e => {
+  const on = e.target.checked;
+  try { await api("/api/mcp", { method: "POST", body: JSON.stringify({ enabled: on }) }); renderMCP(on); }
+  catch (err) { e.target.checked = !on; alert(err.message || err); }
+});
 async function loadPairing() {
-  const [p, devs] = await Promise.all([api("/api/pair"), api("/api/devices")]);
+  const [p, devs, o] = await Promise.all([api("/api/pair"), api("/api/devices"), api("/api/overview")]);
   renderPair(p);
+  renderMCP(o.mcp_enabled);
   $("#devices tbody").innerHTML = devs.length ? devs.map(d => `<tr>
       <td>${esc(d.name)}${d.revoked ? ` <span class="badge bad">${t("dev.revoked")}</span>` : ""}<div class="muted detail">${esc(d.last_ip)}</div></td>
       <td class="nowrap">${when(d.created)}</td><td class="nowrap">${d.last_seen ? ago(d.last_seen) : "–"}</td>

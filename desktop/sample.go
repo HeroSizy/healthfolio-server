@@ -16,6 +16,7 @@ type Sample struct {
 	devices  []model.Device
 
 	manualUpdates bool
+	mcpOff        bool
 }
 
 func NewSample(update func(func())) *Sample {
@@ -48,7 +49,7 @@ func (s *Sample) Overview() model.Overview {
 			{Type: "HKCategoryTypeIdentifierSleepAnalysis", Count: 3_102}, {Type: "HKQuantityTypeIdentifierRestingHeartRate", Count: 812},
 			{Type: "HKQuantityTypeIdentifierOxygenSaturation", Count: 640}, {Type: "HKQuantityTypeIdentifierBodyMass", Count: 88},
 		}},
-		Activity: act, Devices: 2, Reports: 3, LastSync: &last, PairModes: []string{"dialog", "code"},
+		Activity: act, Devices: 2, Reports: 3, LastSync: &last, PairModes: []string{"dialog", "code"}, MCPEnabled: !s.mcpOff,
 	}
 }
 
@@ -84,6 +85,8 @@ func (s *Sample) RevokeDevice(id int64) error {
 	return nil
 }
 func (s *Sample) DeleteDevice(id int64) error { return nil }
+func (s *Sample) SetMCPEnabled(on bool) error { s.mcpOff = !on; return nil }
+func (s *Sample) SkillMD() string             { return "---\nname: healthsync\n---\n" }
 func (s *Sample) RenameDevice(id int64, name string) error {
 	for i := range s.devices {
 		if s.devices[i].ID == id {
