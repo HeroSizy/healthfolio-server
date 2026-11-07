@@ -1,4 +1,4 @@
-package main
+package server
 
 import (
 	"crypto/sha256"
@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"github.com/herosizy/healthsync-server/model"
 	"sync"
 	"time"
 
@@ -15,9 +16,10 @@ import (
 // DB wraps the SQLite database. The records/checkup tables and the daily view use
 // exactly the schema of the original receiver.py, so an existing health.db keeps working.
 type DB struct {
-	sql  *sql.DB
-	path string
-	mu   sync.Mutex // serialises writes
+	sql   *sql.DB
+	path  string
+	mu    sync.Mutex // serialises writes
+	onLog func(LogEntry)
 }
 
 const schema = `
@@ -150,17 +152,9 @@ func (d *DB) InsertReport(rep Report, folderName, folder string) (int, error) {
 	return len(rep.Items), tx.Commit()
 }
 
-type TypeStat struct {
-	Type   string `json:"type"`
-	Count  int    `json:"count"`
-	Latest string `json:"latest"`
-}
+type TypeStat = model.TypeStat
 
-type Stats struct {
-	Total        int        `json:"total"`
-	LastReceived *string    `json:"last_received"`
-	Types        []TypeStat `json:"types"`
-}
+type Stats = model.Stats
 
 // Stats matches the /stats response of receiver.py.
 func (d *DB) Stats() (Stats, error) {
@@ -190,20 +184,7 @@ func (d *DB) Stats() (Stats, error) {
 
 // ---------------------------------------------------------------- sync log
 
-type LogEntry struct {
-	ID         int64    `json:"id"`
-	Time       string   `json:"time"`
-	Kind       string   `json:"kind"` // ingest | report | pair | auth
-	Device     string   `json:"device"`
-	IP         string   `json:"ip"`
-	Received   int      `json:"received"`
-	Added      int      `json:"added"`
-	Bytes      int      `json:"bytes"`
-	DurationMS int      `json:"duration_ms"`
-	OK         bool     `json:"ok"`
-	Message    string   `json:"message"`
-	Types      []string `json:"types"`
-}
+type LogEntry = model.LogEntry
 
 func (d *DB) Log(e LogEntry) {
 	if e.Time == "" {
@@ -216,6 +197,9 @@ func (d *DB) Log(e LogEntry) {
 		VALUES (?,?,?,?,?,?,?,?,?,?,?)`, e.Time, e.Kind, e.Device, e.IP, e.Received, e.Added, e.Bytes, e.DurationMS, e.OK, e.Message, string(types))
 	// keep the log bounded
 	_, _ = d.sql.Exec(`DELETE FROM sync_log WHERE id <= (SELECT MAX(id) FROM sync_log) - 20000`)
+	if d.onLog != nil {
+		go d.onLog(e)
+	}
 }
 
 func (d *DB) Logs(limit int, before int64, kind string) ([]LogEntry, error) {
@@ -251,12 +235,7 @@ func (d *DB) Logs(limit int, before int64, kind string) ([]LogEntry, error) {
 	return out, rows.Err()
 }
 
-type DayCount struct {
-	Day   string `json:"day"`
-	Added int    `json:"added"`
-	Syncs int    `json:"syncs"`
-	Fails int    `json:"fails"`
-}
+type DayCount = model.DayCount
 
 // Activity returns per-day ingest activity for the last n days (local time).
 func (d *DB) Activity(days int) ([]DayCount, error) {
@@ -287,14 +266,7 @@ func (d *DB) Activity(days int) ([]DayCount, error) {
 
 // ---------------------------------------------------------------- devices
 
-type Device struct {
-	ID       int64  `json:"id"`
-	Name     string `json:"name"`
-	Created  string `json:"created"`
-	LastSeen string `json:"last_seen"`
-	LastIP   string `json:"last_ip"`
-	Revoked  bool   `json:"revoked"`
-}
+type Device = model.Device
 
 func hashToken(t string) string {
 	h := sha256.Sum256([]byte(t))
@@ -362,14 +334,7 @@ func (d *DB) DeleteDevice(id int64) error {
 
 // ---------------------------------------------------------------- reports & data browsing
 
-type ReportRow struct {
-	ID          string `json:"id"`
-	Date        string `json:"date"`
-	Institution string `json:"institution"`
-	Items       int    `json:"items"`
-	Flagged     int    `json:"flagged"`
-	Received    string `json:"received"`
-}
+type ReportRow = model.ReportRow
 
 func (d *DB) Reports() ([]ReportRow, error) {
 	// reports received by receiver.py only exist in checkup, so derive from there
@@ -392,15 +357,7 @@ func (d *DB) Reports() ([]ReportRow, error) {
 	return out, rows.Err()
 }
 
-type DailyPoint struct {
-	Day   string  `json:"day"`
-	Total float64 `json:"total"`
-	Mean  float64 `json:"mean"`
-	Min   float64 `json:"min"`
-	Max   float64 `json:"max"`
-	N     int     `json:"n"`
-	Unit  string  `json:"unit"`
-}
+type DailyPoint = model.DailyPoint
 
 func (d *DB) Daily(typ string, days int) ([]DailyPoint, error) {
 	since := time.Now().AddDate(0, 0, -days+1).Format("2006-01-02")

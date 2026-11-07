@@ -39,3 +39,34 @@ jobs:
           build-args: VERSION=${{ github.ref_name }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+  desktop:
+    # The desktop app (native window + menu bar), packaged by MyGo. Unsigned on macOS:
+    # the first launch needs right-click > Open.
+    needs: binaries
+    name: desktop ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: macOS, os: macos-latest, platform: "darwin/arm64,darwin/amd64" }
+          - { name: Windows, os: ubuntu-latest, platform: "windows/amd64,windows/arm64" }
+          - { name: Linux, os: ubuntu-latest, platform: "linux/amd64,linux/arm64" }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version-file: go.mod }
+      - name: Install NSIS, for the Windows installers
+        if: matrix.name == 'Windows'
+        run: sudo apt-get update && sudo apt-get install -y nsis
+      - name: Build
+        run: |
+          jq --arg v "${GITHUB_REF_NAME#v}" '.version = $v' mygo.json > mygo.tmp && mv mygo.tmp mygo.json
+          go tool mygo build -platform "${{ matrix.platform }}"
+      - name: Upload to the release
+        env: { GH_TOKEN: "${{ github.token }}" }
+        shell: bash
+        run: |
+          files=$(find build -type f \( -name '*.dmg' -o -name '*-setup-*.exe' -o -name '*.deb' -o -name '*.tar.gz' \))
+          echo "$files"
+          gh release upload "$GITHUB_REF_NAME" $files --clobber

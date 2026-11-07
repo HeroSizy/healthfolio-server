@@ -4,7 +4,7 @@ A small self-hosted server that receives Apple Health data from the **HealthSync
 and keeps it in a local SQLite database you own. One static binary (or a Docker image), no
 cloud, no account.
 
-- **Web dashboard**: records per day, every data type with daily charts, a full sync history
+- **Dashboard** (native in the app, web in the headless build): records per day, every data type with daily charts, a full sync history
   (who sent what, how many new records, failures and rejected tokens), checkup reports.
 - **Pair by QR code**: click *Pair a new iPhone*, scan with the iPhone camera, done. Each
   paired device gets its own token, which you can revoke from the dashboard.
@@ -19,7 +19,36 @@ cloud, no account.
 
 中文说明见[下方](#中文)。
 
-## Quick start
+## Two ways to run it
+
+- **HealthSync, the desktop app** (macOS, Windows, Linux): the server with a menu bar icon
+  and a native window, drawn on the GPU by [MyGo](https://github.com/egoist/mygo) (no
+  webview, no Electron). Pair by QR, watch syncs arrive, connect AI assistants, and choose
+  where data is stored (any folder, daily CSV files, a command to run after syncs) in
+  Settings, saved to `settings.json` in the user config folder.
+- **healthsync-server, headless** (servers, NAS, Raspberry Pi, Docker): the same server with
+  the web dashboard. The desktop binary runs this way too with `--headless`.
+
+![Overview](docs/overview.png)
+
+| Pairing | Settings |
+|---|---|
+| ![Pairing, dark](docs/pair-dark.png) | ![Settings](docs/settings.png) |
+
+### Desktop app
+
+Download it from [Releases](../../releases) (`.dmg`, `-setup.exe`, `.deb`/`.tar.gz`). The
+macOS build isn't notarized yet: open it the first time with right-click › Open. From source:
+
+```sh
+make run          # build to dist/dev/HealthSync and run it
+make preview      # the window with sample data, in a browser (WebAssembly)
+make app          # packaged apps in build/
+```
+
+Closing the window keeps the server running in the menu bar; quit from the menu bar icon.
+
+## Headless server
 
 ### Binary
 
@@ -166,6 +195,7 @@ QR codes encode `healthsync://pair?url=<server>&code=<code>&name=<name>`.
   可以在面板里单独撤销。
 - **自动发现**：局域网 Bonjour 广播，App 能自己找到服务器。
 - **MCP**：让 Claude 等 AI 助手只读查询你的健康数据（`/mcp` 或 `healthsync-server mcp`）。
+- **桌面 App**：MyGo 原生界面 + 菜单栏图标，在设置里自己选数据存到哪个文件夹、要不要每天导出 CSV、同步后运行什么命令。
 - 支持 macOS、Linux（含树莓派、NAS）、Windows；Docker 推荐 `--network host`。
 
 ```sh

@@ -1,4 +1,4 @@
-package main
+package server
 
 import (
 	"crypto/rand"
@@ -84,7 +84,8 @@ func expandHome(p string) string {
 	return p
 }
 
-func bindFlags(fs *flag.FlagSet) *Config {
+// BindFlags registers the server's flags (each with an environment variable) on fs.
+func BindFlags(fs *flag.FlagSet) *Config {
 	c := &Config{}
 	fs.IntVar(&c.Port, "port", envInt(8787, "HEALTHSYNC_PORT", "HEALTH_SYNC_PORT"), "HTTP port")
 	fs.StringVar(&c.Bind, "bind", firstNonEmpty(env("HEALTHSYNC_BIND", "HEALTH_SYNC_BIND"), "0.0.0.0"), "address to listen on")
@@ -110,7 +111,8 @@ func firstNonEmpty(v ...string) string {
 	return ""
 }
 
-func (c *Config) prepare() error {
+// Prepare fills in defaults and creates the data directory.
+func (c *Config) Prepare() error {
 	c.DataDir = expandHome(c.DataDir)
 	if c.CSVDir != "" {
 		c.CSVDir = expandHome(c.CSVDir)

@@ -8,7 +8,7 @@ builds:
       - { goos: darwin, goarch: arm }
       - { goos: windows, goarch: arm }
     flags: [-trimpath]
-    ldflags: ["-s -w -X main.version={{.Version}}"]
+    ldflags: ["-s -w -X github.com/herosizy/healthsync-server/server.version={{.Version}}"]
 archives:
   - formats: [tar.gz]
     format_overrides:

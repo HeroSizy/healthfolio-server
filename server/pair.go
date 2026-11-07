@@ -1,4 +1,4 @@
-package main
+package server
 
 import (
 	"context"
@@ -6,6 +6,7 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"fmt"
+	"github.com/herosizy/healthsync-server/model"
 	"math/big"
 	"net/url"
 	"os"
@@ -20,7 +21,7 @@ import (
 )
 
 const (
-	pairTTL      = 10 * time.Minute
+	PairTTL      = 10 * time.Minute
 	pairMaxTries = 5
 	dialogWait   = 120 * time.Second
 )
@@ -58,7 +59,7 @@ func (p *Pairing) New() (PairCode, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	n, _ := rand.Int(rand.Reader, big.NewInt(1_000_000))
-	c := PairCode{Code: fmt.Sprintf("%06d", n.Int64()), Expires: float64(time.Now().Add(pairTTL).Unix())}
+	c := PairCode{Code: fmt.Sprintf("%06d", n.Int64()), Expires: float64(time.Now().Add(PairTTL).Unix())}
 	b, _ := json.Marshal(c)
 	return c, os.WriteFile(p.file, b, 0o600)
 }
@@ -188,6 +189,14 @@ func (p *Pairing) Pending() []*PendingPair {
 	out := make([]*PendingPair, 0, len(p.pending))
 	for _, pp := range p.pending {
 		out = append(out, pp)
+	}
+	return out
+}
+
+func (p *Pairing) PendingInfo() []model.PendingPair {
+	out := []model.PendingPair{}
+	for _, pp := range p.Pending() {
+		out = append(out, model.PendingPair{ID: pp.ID, Device: pp.Device, IP: pp.IP, Created: pp.Created.Format(time.RFC3339)})
 	}
 	return out
 }

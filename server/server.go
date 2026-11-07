@@ -1,4 +1,4 @@
-package main
+package server
 
 import (
 	"crypto/subtle"
@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"github.com/herosizy/healthsync-server/model"
 	"io"
 	"io/fs"
 	"net"
@@ -428,11 +429,11 @@ func (s *Server) handlePair(w http.ResponseWriter, r *http.Request) {
 // ---------------------------------------------------------------- dashboard API
 
 func (s *Server) apiOverview(w http.ResponseWriter, r *http.Request) {
-	st, err := s.db.Stats()
-	if err != nil {
-		errJSON(w, 500, err.Error())
-		return
-	}
+	writeJSON(w, 200, s.overview(s.baseURL(r)))
+}
+
+func (s *Server) overview(base string) model.Overview {
+	st, _ := s.db.Stats()
 	act, _ := s.db.Activity(30)
 	devs, _ := s.db.Devices()
 	reps, _ := s.db.Reports()
@@ -443,23 +444,23 @@ func (s *Server) apiOverview(w http.ResponseWriter, r *http.Request) {
 			active++
 		}
 	}
-	outputs := []map[string]string{{"kind": "sqlite", "where": s.db.path}}
+	outputs := []model.Output{{Kind: "sqlite", Where: s.db.path}}
 	if s.csv != nil {
-		outputs = append(outputs, map[string]string{"kind": "csv", "where": s.csv.dir})
+		outputs = append(outputs, model.Output{Kind: "csv", Where: s.csv.dir})
 	}
 	if s.hook != nil {
-		outputs = append(outputs, map[string]string{"kind": "hook", "where": s.hook.cmd})
+		outputs = append(outputs, model.Output{Kind: "hook", Where: s.hook.cmd})
 	}
-	var lastSync any
+	o := model.Overview{
+		Name: s.cfg.Name, Version: version, Protocol: protocolVersion, OS: osTag(),
+		Started: s.started.Format(time.RFC3339), BaseURL: base, MCPURL: base + "/mcp", DataDir: s.cfg.DataDir,
+		Outputs: outputs, Stats: st, Activity: act, Devices: active, Reports: len(reps),
+		PairModes: s.dialogModes(), Password: s.cfg.AdminPassword != "",
+	}
 	if len(last) > 0 {
-		lastSync = last[0]
+		o.LastSync = &last[0]
 	}
-	writeJSON(w, 200, map[string]any{
-		"name": s.cfg.Name, "version": version, "protocol": protocolVersion, "os": osTag(),
-		"started": s.started.Format(time.RFC3339), "base_url": s.baseURL(r), "data_dir": s.cfg.DataDir,
-		"outputs": outputs, "stats": st, "activity": act, "devices": active, "reports": len(reps),
-		"last_sync": lastSync, "mcp_url": s.baseURL(r) + "/mcp", "pair_modes": s.dialogModes(), "password": s.cfg.AdminPassword != "",
-	})
+	return o
 }
 
 // baseURL guesses the address a phone should use. If you opened the dashboard through a

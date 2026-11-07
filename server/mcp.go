@@ -1,4 +1,4 @@
-package main
+package server
 
 // A small Model Context Protocol server so AI assistants (Claude, etc.) can read your
 // health data. Two transports:
@@ -14,6 +14,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"github.com/herosizy/healthsync-server/model"
 	"io"
 	"net/http"
 	"net/url"
@@ -335,8 +336,9 @@ func (m *MCP) ServeStdio(in io.Reader, out io.Writer) error {
 	return sc.Err()
 }
 
-func cmdMCP(cfg *Config) error {
-	if err := cfg.prepare(); err != nil {
+// RunMCPStdio serves MCP on stdin/stdout from the database in cfg's data directory.
+func RunMCPStdio(cfg *Config) error {
+	if err := cfg.Prepare(); err != nil {
 		return err
 	}
 	p := cfg.DataDir + string(os.PathSeparator) + "health.db"
@@ -352,20 +354,9 @@ func cmdMCP(cfg *Config) error {
 
 // MCPConnect is everything a client needs to show "connect your AI agent" with one-tap copy.
 // Used by the dashboard and by the iPhone app (POST /mcp/tokens).
-type MCPConnect struct {
-	Name       string            `json:"name"`
-	Token      string            `json:"token"`
-	URL        string            `json:"url"`
-	Transport  string            `json:"transport"`
-	Configs    map[string]string `json:"configs"`
-	ConfigList []MCPConfig       `json:"config_list"`
-}
+type MCPConnect = model.MCPConnect
 
-type MCPConfig struct {
-	ID    string `json:"id"`
-	Title string `json:"title"`
-	Text  string `json:"text"`
-}
+type MCPConfig = model.MCPConfig
 
 func mcpConnect(serverName, url, token string) MCPConnect {
 	auth := "Bearer " + token
@@ -374,10 +365,10 @@ func mcpConnect(serverName, url, token string) MCPConnect {
 	remote, _ := json.MarshalIndent(map[string]any{"mcpServers": map[string]any{"healthsync": map[string]any{
 		"command": "npx", "args": []string{"-y", "mcp-remote", url, "--allow-http", "--header", "Authorization:" + auth}}}}, "", "  ")
 	list := []MCPConfig{
-		{"claude_code", "Claude Code", fmt.Sprintf("claude mcp add --transport http healthsync %s --header \"Authorization: %s\"", url, auth)},
-		{"json", "JSON (Cursor, VS Code, Windsurf, …)", string(jsonCfg)},
-		{"stdio_bridge", "Claude Desktop / stdio-only clients", string(remote)},
-		{"agent_prompt", "Instructions for any AI agent", fmt.Sprintf(`Connect to my personal health data through MCP (read-only).
+		{ID: "claude_code", Title: "Claude Code", Text: fmt.Sprintf("claude mcp add --transport http healthsync %s --header \"Authorization: %s\"", url, auth)},
+		{ID: "json", Title: "JSON (Cursor, VS Code, Windsurf, …)", Text: string(jsonCfg)},
+		{ID: "stdio_bridge", Title: "Claude Desktop / stdio-only clients", Text: string(remote)},
+		{ID: "agent_prompt", Title: "Instructions for any AI agent", Text: fmt.Sprintf(`Connect to my personal health data through MCP (read-only).
 
 - Server: HealthSync on %s
 - Transport: Streamable HTTP, JSON-RPC 2.0, POST %s
