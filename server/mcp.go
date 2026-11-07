@@ -102,7 +102,7 @@ var mcpTools = []tool{
 			"from": prop("string", "Earliest report date, YYYY-MM-DD"),
 		}), Annotations: readOnly},
 	{Name: "query_sql", Title: "Read-only SQL",
-		Description: "Run a read-only SQLite query. Tables: records(type, start, end, value, num, unit, source, received), daily view(type, day, unit, total, mean, min, max, n), checkup(report_id, date, institution, name, key, value, num, unit, range, flag). `start`/`end` are ISO 8601 strings with time zone; `num` is the numeric value. At most 1000 rows are returned.",
+		Description: "Run a read-only SQLite query. Tables: records(type, start, end, value, num, unit, source, received, uuid, source_bundle, source_version, device_model, device_software, user_entered, tz, metadata, deleted_at), daily view(type, day, unit, total, mean, min, max, n), checkup(report_id, date, institution, name, key, value, num, unit, range, flag). Views of live samples: v_heart_rate, v_resting_heart_rate, v_hrv, v_steps, v_weight, v_spo2 (uuid, start_at, end_at, <value>, source, device_model), v_sleep (stage), v_workouts (activity, duration_s, distance_km, active_energy_kcal, avg_heart_rate). `start`/`end` are ISO 8601 strings with time zone; `num` is the numeric value; `metadata` is JSON text (use json_extract). Rows with `deleted_at` set were deleted in Apple Health: add `WHERE deleted_at IS NULL` when querying records. At most 1000 rows are returned.",
 		InputSchema: obj(map[string]any{"sql": prop("string", "A single SELECT statement")}, "sql"), Annotations: readOnly},
 }
 
@@ -173,7 +173,7 @@ func (m *MCP) resolveType(t string) (string, error) {
 		return "", fmt.Errorf("type is required")
 	}
 	var full string
-	err := m.db.QueryRow(`SELECT type FROM records WHERE type = ? OR lower(type) LIKE '%' || lower(?) GROUP BY type ORDER BY type = ? DESC, COUNT(*) DESC LIMIT 1`, t, t, t).Scan(&full)
+	err := m.db.QueryRow(`SELECT type FROM records WHERE deleted_at IS NULL AND (type = ? OR lower(type) LIKE '%' || lower(?)) GROUP BY type ORDER BY type = ? DESC, COUNT(*) DESC LIMIT 1`, t, t, t).Scan(&full)
 	if err == sql.ErrNoRows {
 		return "", fmt.Errorf("no data type matching %q; call list_data_types", t)
 	}
@@ -184,7 +184,7 @@ func (m *MCP) call(name string, a map[string]any) (any, error) {
 	switch name {
 	case "list_data_types":
 		return m.rows(`SELECT type, COUNT(*) AS count, MAX(unit) AS unit, MIN(substr(start,1,10)) AS first_day, MAX(substr(start,1,10)) AS last_day
-			FROM records GROUP BY type ORDER BY count DESC`)
+			FROM records WHERE deleted_at IS NULL GROUP BY type ORDER BY count DESC`)
 	case "daily_summary":
 		t, err := m.resolveType(argStr(a, "type"))
 		if err != nil {
@@ -211,7 +211,7 @@ func (m *MCP) call(name string, a map[string]any) (any, error) {
 		if v, ok := a["limit"].(float64); ok && v > 0 {
 			limit = min(int(v), 2000)
 		}
-		rows, err := m.rows(`SELECT start, "end", value, unit, source FROM records WHERE type = ? AND start >= ? AND start <= ? ORDER BY start DESC LIMIT ?`,
+		rows, err := m.rows(`SELECT start, "end", value, unit, source, device_model, metadata FROM records WHERE type = ? AND deleted_at IS NULL AND start >= ? AND start <= ? ORDER BY start DESC LIMIT ?`,
 			t, from, to, limit)
 		return map[string]any{"type": t, "records": rows}, err
 	case "get_checkups":
@@ -345,6 +345,12 @@ func RunMCPStdio(cfg *Config) error {
 	if _, err := os.Stat(p); err != nil {
 		return fmt.Errorf("no database at %s (start the server and sync once first)", p)
 	}
+	// bring a database from receiver.py or an older version up to date before reading it
+	db, err := OpenDB(p)
+	if err != nil {
+		return err
+	}
+	db.Close()
 	m, err := OpenMCP(p)
 	if err != nil {
 		return err

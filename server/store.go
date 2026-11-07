@@ -33,10 +33,6 @@ CREATE TABLE IF NOT EXISTS checkup (
     report_id TEXT NOT NULL, date TEXT NOT NULL, institution TEXT, name TEXT NOT NULL,
     key TEXT, value TEXT, num REAL, unit TEXT, range TEXT, flag TEXT,
     UNIQUE (report_id, name));
-CREATE VIEW IF NOT EXISTS daily AS
-    SELECT type, substr(start, 1, 10) AS day, unit,
-           SUM(num) AS total, AVG(num) AS mean, MIN(num) AS min, MAX(num) AS max, COUNT(*) AS n
-    FROM records GROUP BY type, day, unit;
 
 -- added by healthsync-server
 CREATE TABLE IF NOT EXISTS sync_log (
@@ -64,42 +60,172 @@ func OpenDB(path string) (*DB, error) {
 		db.Close()
 		return nil, fmt.Errorf("init %s: %w", path, err)
 	}
+	if err := migrate(db); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("migrate %s: %w", path, err)
+	}
 	return &DB{sql: db, path: path}, nil
+}
+
+// recordColumns are the columns healthsync-server adds to receiver.py's records table for
+// the app's full records (the same fields as the app's own database destinations).
+var recordColumns = [][2]string{
+	{"uuid", "TEXT"}, {"source_bundle", "TEXT"}, {"source_version", "TEXT"},
+	{"device_model", "TEXT"}, {"device_software", "TEXT"}, {"user_entered", "INTEGER"},
+	{"tz", "TEXT"}, {"metadata", "TEXT"}, {"deleted_at", "TEXT"},
+}
+
+// views skip deleted samples. v_* match the views the app creates in D1 / Supabase.
+const views = `
+DROP VIEW IF EXISTS daily;
+CREATE VIEW daily AS
+    SELECT type, substr(start, 1, 10) AS day, unit,
+           SUM(num) AS total, AVG(num) AS mean, MIN(num) AS min, MAX(num) AS max, COUNT(*) AS n
+    FROM records WHERE deleted_at IS NULL GROUP BY type, day, unit;
+CREATE VIEW IF NOT EXISTS v_heart_rate AS SELECT uuid, start AS start_at, "end" AS end_at, num AS bpm, source, device_model FROM records WHERE type = 'HeartRate' AND deleted_at IS NULL;
+CREATE VIEW IF NOT EXISTS v_resting_heart_rate AS SELECT uuid, start AS start_at, "end" AS end_at, num AS bpm, source, device_model FROM records WHERE type = 'RestingHeartRate' AND deleted_at IS NULL;
+CREATE VIEW IF NOT EXISTS v_hrv AS SELECT uuid, start AS start_at, "end" AS end_at, num AS ms, source, device_model FROM records WHERE type = 'HeartRateVariabilitySDNN' AND deleted_at IS NULL;
+CREATE VIEW IF NOT EXISTS v_steps AS SELECT uuid, start AS start_at, "end" AS end_at, num AS steps, source, device_model FROM records WHERE type = 'StepCount' AND deleted_at IS NULL;
+CREATE VIEW IF NOT EXISTS v_weight AS SELECT uuid, start AS start_at, "end" AS end_at, num AS kg, source, device_model FROM records WHERE type = 'BodyMass' AND deleted_at IS NULL;
+CREATE VIEW IF NOT EXISTS v_spo2 AS SELECT uuid, start AS start_at, "end" AS end_at, num AS percent, source, device_model FROM records WHERE type = 'OxygenSaturation' AND deleted_at IS NULL;
+CREATE VIEW IF NOT EXISTS v_sleep AS SELECT uuid, start AS start_at, "end" AS end_at, value AS stage, source FROM records WHERE type = 'SleepAnalysis' AND deleted_at IS NULL;
+CREATE VIEW IF NOT EXISTS v_workouts AS
+    SELECT uuid, value AS activity, start AS start_at, "end" AS end_at,
+           CAST(json_extract(metadata, '$.duration_s') AS REAL) AS duration_s,
+           CAST(json_extract(metadata, '$.distance_km') AS REAL) AS distance_km,
+           CAST(json_extract(metadata, '$.active_energy_kcal') AS REAL) AS active_energy_kcal,
+           CAST(json_extract(metadata, '$.avg_heart_rate') AS REAL) AS avg_heart_rate,
+           source, metadata
+    FROM records WHERE type = 'Workout' AND deleted_at IS NULL;
+`
+
+// migrate adds the newer records columns to a database receiver.py (or an older
+// healthsync-server) created, then (re)creates the views.
+func migrate(db *sql.DB) error {
+	rows, err := db.Query(`SELECT name FROM pragma_table_info('records')`)
+	if err != nil {
+		return err
+	}
+	have := map[string]bool{}
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			rows.Close()
+			return err
+		}
+		have[name] = true
+	}
+	rows.Close()
+	for _, c := range recordColumns {
+		if !have[c[0]] {
+			if _, err := db.Exec(`ALTER TABLE records ADD COLUMN ` + c[0] + ` ` + c[1]); err != nil {
+				return err
+			}
+		}
+	}
+	if _, err := db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS records_uuid ON records(uuid) WHERE uuid IS NOT NULL`); err != nil {
+		return err
+	}
+	_, err = db.Exec(views)
+	return err
 }
 
 func (d *DB) Close() error { return d.sql.Close() }
 
 func nowISO() string { return time.Now().Format(time.RFC3339) }
 
-// InsertRecords stores rows, ignoring duplicates, and returns how many were new.
-func (d *DB) InsertRecords(rows []Record) (int, error) {
+// InsertRecords stores rows and applies deletions. It returns how many samples were new
+// and how many were marked deleted.
+//
+// A sample that is already stored is not added again: the same uuid, or, as receiver.py
+// did, the same type, start, end, source and value. When a sample with a uuid matches a row
+// stored without one (sent earlier in the pipe format), that row gets the uuid and the
+// other new fields. A deletion sets deleted_at on the sample with its uuid; the row stays,
+// so other tools reading health.db can see what was deleted.
+func (d *DB) InsertRecords(rows []Record) (added, deleted int, err error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	tx, err := d.sql.Begin()
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 	defer tx.Rollback()
-	st, err := tx.Prepare(`INSERT OR IGNORE INTO records (type, start, "end", value, num, unit, source, received) VALUES (?,?,?,?,?,?,?,?)`)
+	ins, err := tx.Prepare(`INSERT OR IGNORE INTO records (type, start, "end", value, num, unit, source, received,
+		uuid, source_bundle, source_version, device_model, device_software, user_entered, tz, metadata)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
-	defer st.Close()
+	defer ins.Close()
+	// fills in the new fields on a row stored earlier, by uuid or, without one, by content
+	const extras = `uuid = ?, source_bundle = ?, source_version = ?, device_model = ?, device_software = ?,
+		user_entered = ?, tz = ?, metadata = ?`
+	byUUID, err := tx.Prepare(`UPDATE records SET ` + extras + ` WHERE uuid = ?`)
+	if err != nil {
+		return 0, 0, err
+	}
+	defer byUUID.Close()
+	byContent, err := tx.Prepare(`UPDATE records SET ` + extras + `
+		WHERE uuid IS NULL AND type = ? AND start = ? AND "end" = ? AND source = ? AND value = ?`)
+	if err != nil {
+		return 0, 0, err
+	}
+	defer byContent.Close()
+	del, err := tx.Prepare(`UPDATE records SET deleted_at = ? WHERE uuid = ? AND deleted_at IS NULL`)
+	if err != nil {
+		return 0, 0, err
+	}
+	defer del.Close()
+
 	now := nowISO()
-	added := 0
 	for _, r := range rows {
+		if r.Deleted {
+			res, err := del.Exec(firstNonEmpty(r.DeletedAt, now), r.UUID)
+			if err != nil {
+				return 0, 0, err
+			}
+			n, _ := res.RowsAffected()
+			deleted += int(n)
+			continue
+		}
 		var num any
 		if f, ok := asNumber(r.Value); ok {
 			num = f
 		}
-		res, err := st.Exec(r.Type, r.Start, r.End, r.Value, num, r.Unit, r.Source, now)
+		res, err := ins.Exec(r.Type, r.Start, r.End, r.Value, num, r.Unit, r.Source, now,
+			nullable(r.UUID), nullable(r.SourceBundle), nullable(r.SourceVersion), nullable(r.DeviceModel),
+			nullable(r.DeviceSoftware), r.UserEntered, nullable(r.TZ), nullable(r.Metadata))
 		if err != nil {
-			return 0, err
+			return 0, 0, err
 		}
-		n, _ := res.RowsAffected()
-		added += int(n)
+		if n, _ := res.RowsAffected(); n > 0 {
+			added++
+			continue
+		}
+		if r.UUID == "" {
+			continue
+		}
+		set := []any{r.UUID, nullable(r.SourceBundle), nullable(r.SourceVersion), nullable(r.DeviceModel),
+			nullable(r.DeviceSoftware), r.UserEntered, nullable(r.TZ), nullable(r.Metadata)}
+		res, err = byUUID.Exec(append(set, r.UUID)...)
+		if err != nil {
+			return 0, 0, err
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			if _, err := byContent.Exec(append(set, r.Type, r.Start, r.End, r.Source, r.Value)...); err != nil {
+				return 0, 0, err
+			}
+		}
 	}
-	return added, tx.Commit()
+	return added, deleted, tx.Commit()
+}
+
+// nullable stores "" as NULL, so that "no uuid" never collides in the uuid index.
+func nullable(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
 }
 
 type Report struct {
@@ -159,7 +285,7 @@ type Stats = model.Stats
 // Stats matches the /stats response of receiver.py.
 func (d *DB) Stats() (Stats, error) {
 	s := Stats{Types: []TypeStat{}}
-	rows, err := d.sql.Query(`SELECT type, COUNT(*), MAX(start) FROM records GROUP BY type ORDER BY 2 DESC`)
+	rows, err := d.sql.Query(`SELECT type, COUNT(*), MAX(start) FROM records WHERE deleted_at IS NULL GROUP BY type ORDER BY 2 DESC`)
 	if err != nil {
 		return s, err
 	}

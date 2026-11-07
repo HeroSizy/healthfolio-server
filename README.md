@@ -172,15 +172,16 @@ The app talks to these endpoints; other clients can too.
 
 | | |
 |---|---|
-| `GET /health` | `{"ok":true,"name":…,"version":2,"os":…,"pair_modes":[…]}` |
+| `GET /health` | `{"ok":true,"name":…,"version":2,"records":2,"os":…,"pair_modes":[…],"mcp":"/mcp"}`. `"records": 2` means `/ingest` keeps the full JSON Lines records and takes deletions (below). |
 | `POST /pair` | `{"device":"…","code":"123456"}` → `{"token":…}`. Without a code: `428` + `needs_code`, or wait for approval (macOS dialog / dashboard). |
-| `POST /ingest` | `Authorization: Bearer <token>`. Body: one record per line `type\|start\|end\|value\|unit\|source`, or a JSON array / `{"records":[…]}`, JSON Lines, or CSV/TSV with a header. → `{"ok":true,"received":n,"added":{…}}` |
-| `POST /report` | `{"report":{"id","date","institution","items":[{name,key,value,unit,range,flag}]},"folder":…,"files":[{"name","data"(base64)}]}` |
+| `POST /ingest` | `Authorization: Bearer <token>`. Body: one record per line `type\|start\|end\|value\|unit\|source`, or a JSON array / `{"records":[…],"deleted":["uuid",…]}`, JSON Lines, or CSV/TSV with a header. → `{"ok":true,"received":n,"added":{…},"deleted":n}` || `POST /report` | `{"report":{"id","date","institution","items":[{name,key,value,unit,range,flag}]},"folder":…,"files":[{"name","data"(base64)}]}` |
 | `GET /stats` | counts per type |
 | `POST /mcp` | MCP (Streamable HTTP, JSON responses), Bearer token |
 | `POST /mcp/tokens` | Bearer device token, `{"name":"Claude"}` → a new revocable token for an AI agent plus ready-to-copy configs: `{"url","token","transport","configs":{"claude_code","json","stdio_bridge","agent_prompt"},"config_list":[{"id","title","text"}]}` |
 
 QR codes encode `healthsync://pair?url=<server>&code=<code>&name=<name>`.
+
+**Full records.** JSON rows may carry `uuid`, `source_bundle`, `source_version`, `device_model`, `device_software`, `user_entered`, `tz` and `metadata` (an object of strings), as the app's JSON Lines export does; they are stored in the same-named columns of `records`. A sample is stored once per `uuid`, and a row that arrived earlier in the pipe format, without one, gets the uuid and the other fields when it comes again. A line `{"uuid":"…","deleted":true}` (optionally `"deleted_at":"<ISO 8601>"`) marks that sample deleted: the row stays with `deleted_at` set, and statistics, the `daily` view, the `v_*` views (`v_heart_rate`, `v_steps`, `v_sleep`, `v_workouts`, …, as in the app's D1/Supabase schema) and MCP leave it out. Daily CSV files and the hook inbox keep the six pipe columns and get no deletions.
 
 ---
 

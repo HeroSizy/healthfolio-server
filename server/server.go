@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"github.com/herosizy/healthsync-server/model"
 	"io"
 	"io/fs"
@@ -196,6 +197,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{
 		"ok": true, "name": s.cfg.Name, "version": protocolVersion, "os": osTag(),
 		"pair_modes": s.dialogModes(), "stores": stores, "server": "healthsync-server/" + version, "mcp": "/mcp",
+		"records": recordsVersion,
 	})
 }
 
@@ -249,13 +251,18 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 	entry.Received = len(rows)
 	entry.Types = distinctTypes(rows, 30)
 	added := map[string]int{}
-	n, err := s.db.InsertRecords(rows)
+	n, deleted, err := s.db.InsertRecords(rows)
 	if err != nil {
 		fail(500, "sqlite: "+err.Error())
 		return
 	}
 	added["sqlite"] = n
 	entry.Added = n
+	if deleted > 0 {
+		entry.Message = fmt.Sprintf("%d deleted", deleted)
+	}
+	// CSV files and the hook inbox keep the six-column format and get no deletions.
+	rows = samples(rows)
 	if s.csv != nil {
 		n, err := s.csv.Write(rows)
 		if err != nil {
@@ -274,15 +281,15 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 	entry.OK = true
 	entry.DurationMS = int(time.Since(start).Milliseconds())
 	s.db.Log(entry)
-	logf("received %d records from %s (%s), %d new", len(rows), device, ip, added["sqlite"])
-	writeJSON(w, 200, map[string]any{"ok": true, "received": len(rows), "added": added})
+	logf("received %d records from %s (%s), %d new, %d deleted", entry.Received, device, ip, added["sqlite"], deleted)
+	writeJSON(w, 200, map[string]any{"ok": true, "received": entry.Received, "added": added, "deleted": deleted})
 }
 
 func distinctTypes(rows []Record, max int) []string {
 	seen := map[string]bool{}
 	var out []string
 	for _, r := range rows {
-		if !seen[r.Type] {
+		if r.Type != "" && !seen[r.Type] {
 			seen[r.Type] = true
 			out = append(out, r.Type)
 		}
