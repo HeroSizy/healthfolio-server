@@ -14,7 +14,7 @@ const ZH = {
   "pair.s2": "在 iPhone 上用相机扫二维码，或在 App → 添加目的地 → 本地服务器 里扫码。",
   "pair.s3": "App 会自动保存地址和自己的令牌，完成。",
   "pair.expires": "剩余", "pair.copy": "复制链接", "pair.cancel": "取消",
-  "dev.title": "已配对设备", "dev.paired": "配对时间", "dev.seen": "最近同步", "dev.revoke": "撤销", "dev.revoked": "已撤销", "dev.delete": "删除",
+  "dev.title": "已配对设备", "dev.paired": "配对时间", "dev.seen": "最近同步", "dev.revoke": "撤销", "dev.revoked": "已撤销", "dev.delete": "删除", "dev.rename": "重命名", "dev.renameAsk": "新的名字（令牌不变，不用重新配对）",
   "dev.none": "还没有配对的设备。", "dev.confirm": "撤销后这台设备就不能再同步了，需要重新配对。确定吗？",
   "tok.title": "共享令牌（手动配置用）", "tok.hint": "扫不了码时，可以把它粘贴到 App 里。配对的设备各有自己的令牌，可以在上面单独撤销。",
   "tok.show": "显示", "tok.hide": "隐藏",
@@ -33,7 +33,7 @@ const ZH = {
 };
 const lang = (navigator.language || "en").toLowerCase().startsWith("zh") ? "zh" : "en";
 const EN_FALLBACK = {
-  "dev.revoke": "Revoke", "dev.revoked": "Revoked", "dev.delete": "Delete", "dev.none": "No paired devices yet.",
+  "dev.revoke": "Revoke", "dev.revoked": "Revoked", "dev.delete": "Delete", "dev.rename": "Rename", "dev.renameAsk": "New name (the token stays; no need to pair again)","dev.none": "No paired devices yet.",
   "dev.confirm": "This device won't be able to sync any more until it pairs again. Revoke?", "tok.hide": "Hide",
   "rep.none": "No checkup reports yet.", "pend.title": "A device wants to pair", "pend.allow": "Allow", "pend.deny": "Deny", "pend.from": "from",
   "ev.ingest": "Data", "ev.report": "Checkup", "ev.pair": "Pairing", "ev.auth": "Bad token", "ev.hook": "Hook",
@@ -220,7 +220,7 @@ async function loadPairing() {
   $("#devices tbody").innerHTML = devs.length ? devs.map(d => `<tr>
       <td>${esc(d.name)}${d.revoked ? ` <span class="badge bad">${t("dev.revoked")}</span>` : ""}<div class="muted detail">${esc(d.last_ip)}</div></td>
       <td class="nowrap">${when(d.created)}</td><td class="nowrap">${d.last_seen ? ago(d.last_seen) : "–"}</td>
-      <td class="num">${d.revoked
+      <td class="num nowrap"><button class="ghost" data-rename="${d.id}" data-name="${esc(d.name)}">${t("dev.rename")}</button> ${d.revoked
         ? `<button class="ghost danger" data-del="${d.id}">${t("dev.delete")}</button>`
         : `<button class="ghost danger" data-revoke="${d.id}">${t("dev.revoke")}</button>`}</td></tr>`).join("")
     : `<tr><td colspan="4" class="empty">${t("dev.none")}</td></tr>`;
@@ -258,6 +258,13 @@ document.addEventListener("click", async e => {
     else if (b.id === "pair-cancel") { await api("/api/pair", { method: "DELETE" }); loadPairing(); }
     else if (b.id === "pair-copy") { await navigator.clipboard.writeText(pairState.link); b.textContent = t("copied"); }
     else if (b.dataset.revoke) { if (confirm(t("dev.confirm"))) { await api(`/api/devices/${b.dataset.revoke}/revoke`, { method: "POST" }); loadPairing(); } }
+    else if (b.dataset.rename) {
+      const name = prompt(t("dev.renameAsk"), b.dataset.name);
+      if (name && name.trim() && name.trim() !== b.dataset.name) {
+        await api(`/api/devices/${b.dataset.rename}`, { method: "PATCH", body: JSON.stringify({ name: name.trim() }) });
+        loadPairing();
+      }
+    }
     else if (b.dataset.del) { await api(`/api/devices/${b.dataset.del}`, { method: "DELETE" }); loadPairing(); }
     else if (b.dataset.answer) { await api(`/api/pair/pending/${b.dataset.answer}`, { method: "POST", body: JSON.stringify({ allow: b.dataset.allow === "1" }) }); setTimeout(loadPairing, 500); }
     else if (b.id === "mcp-token") {

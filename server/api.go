@@ -96,6 +96,9 @@ func (in *Instance) Logs(limit int, before int64, kind string) ([]model.LogEntry
 func (in *Instance) Devices() ([]model.Device, error)    { return in.db.Devices() }
 func (in *Instance) RevokeDevice(id int64) error         { return in.db.RevokeDevice(id) }
 func (in *Instance) DeleteDevice(id int64) error         { return in.db.DeleteDevice(id) }
+func (in *Instance) RenameDevice(id int64, name string) error {
+	return in.db.RenameDevice(id, name)
+}
 func (in *Instance) Reports() ([]model.ReportRow, error) { return in.db.Reports() }
 func (in *Instance) Daily(typ string, days int) ([]model.DailyPoint, error) {
 	return in.db.Daily(typ, days)

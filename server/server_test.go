@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -125,6 +126,19 @@ func TestFlow(t *testing.T) {
 	devs, _ := s.db.Devices()
 	if len(devs) != 1 || devs[0].Name != "My iPhone" {
 		t.Fatalf("devices: %v", devs)
+	}
+	// rename: the token keeps working
+	if code, r := do(t, "PATCH", ts.URL+"/api/devices/"+strconv.FormatInt(devs[0].ID, 10), "", `{"name":" Zen's iPhone "}`, "X-HealthSync", "1"); code != 200 {
+		t.Fatalf("rename: %d %v", code, r)
+	}
+	if devs, _ = s.db.Devices(); devs[0].Name != "Zen's iPhone" {
+		t.Fatalf("renamed: %v", devs)
+	}
+	if code, _ := do(t, "GET", ts.URL+"/stats", devTok, ""); code != 200 {
+		t.Fatalf("token broken by rename")
+	}
+	if err := s.db.RenameDevice(devs[0].ID, "  "); err == nil {
+		t.Fatalf("empty name accepted")
 	}
 	_ = s.db.RevokeDevice(devs[0].ID)
 	if code, _ := do(t, "GET", ts.URL+"/stats", devTok, ""); code != 401 {

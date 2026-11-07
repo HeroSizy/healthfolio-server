@@ -110,6 +110,7 @@ func (s *Server) routes() {
 	m.HandleFunc("POST /api/devices", s.admin(s.apiNewDevice))
 	m.HandleFunc("POST /api/devices/{id}/revoke", s.admin(s.apiRevoke))
 	m.HandleFunc("DELETE /api/devices/{id}", s.admin(s.apiDeleteDevice))
+	m.HandleFunc("PATCH /api/devices/{id}", s.admin(s.apiRenameDevice))
 	m.HandleFunc("GET /api/pair", s.admin(s.apiPairGet))
 	m.HandleFunc("POST /api/pair", s.admin(s.apiPairNew))
 	m.HandleFunc("DELETE /api/pair", s.admin(s.apiPairCancel))
@@ -571,6 +572,25 @@ func (s *Server) apiRevoke(w http.ResponseWriter, r *http.Request) {
 	id, err := pathID(r)
 	if err == nil {
 		err = s.db.RevokeDevice(id)
+	}
+	if err != nil {
+		errJSON(w, 400, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"ok": true})
+}
+
+// apiRenameDevice takes {"name":"…"}.
+func (s *Server) apiRenameDevice(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Name string `json:"name"`
+	}
+	id, err := pathID(r)
+	if err == nil {
+		err = json.NewDecoder(io.LimitReader(r.Body, 1024)).Decode(&req)
+	}
+	if err == nil {
+		err = s.db.RenameDevice(id, req.Name)
 	}
 	if err != nil {
 		errJSON(w, 400, err.Error())

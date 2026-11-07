@@ -84,6 +84,14 @@ func (s *Sample) RevokeDevice(id int64) error {
 	return nil
 }
 func (s *Sample) DeleteDevice(id int64) error { return nil }
+func (s *Sample) RenameDevice(id int64, name string) error {
+	for i := range s.devices {
+		if s.devices[i].ID == id {
+			s.devices[i].Name = name
+		}
+	}
+	return nil
+}
 func (s *Sample) Reports() ([]model.ReportRow, error) {
 	return []model.ReportRow{
 		{ID: "a", Date: "2026-10-18", Institution: "Annual checkup", Items: 46, Flagged: 3, Received: time.Now().Add(-3 * time.Hour).Format(time.RFC3339)},

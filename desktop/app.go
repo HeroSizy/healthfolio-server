@@ -18,6 +18,7 @@ type Backend interface {
 	Devices() ([]model.Device, error)
 	RevokeDevice(id int64) error
 	DeleteDevice(id int64) error
+	RenameDevice(id int64, name string) error
 	Reports() ([]model.ReportRow, error)
 	Daily(typ string, days int) ([]model.DailyPoint, error)
 	NewPairCode() (model.PairInfo, error)
@@ -62,7 +63,9 @@ type App struct {
 	logKind    int
 	moreLogs   bool
 	devices    []model.Device
-	reports    []model.ReportRow
+	renaming   int64 // the device whose name is being edited, or 0
+	renameText string
+	reports   []model.ReportRow
 	pair       *model.PairInfo
 	pairQR     *ui.Bitmap
 	pending    []model.PendingPair

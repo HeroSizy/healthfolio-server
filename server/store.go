@@ -6,9 +6,12 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"github.com/herosizy/healthsync-server/model"
+	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
+
+	"github.com/herosizy/healthsync-server/model"
 
 	_ "modernc.org/sqlite"
 )
@@ -448,6 +451,24 @@ func (d *DB) RevokeDevice(id int64) error {
 	defer d.mu.Unlock()
 	_, err := d.sql.Exec(`UPDATE devices SET revoked = 1 WHERE id = ?`, id)
 	return err
+}
+
+// RenameDevice changes the name shown for a paired device. Its token stays the same.
+func (d *DB) RenameDevice(id int64, name string) error {
+	name = strings.TrimSpace(name)
+	if name == "" || utf8.RuneCountInString(name) > 64 {
+		return fmt.Errorf("a device name needs 1 to 64 characters")
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	res, err := d.sql.Exec(`UPDATE devices SET name = ? WHERE id = ?`, name, id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("no device %d", id)
+	}
+	return nil
 }
 
 func (d *DB) DeleteDevice(id int64) error {

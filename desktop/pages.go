@@ -420,6 +420,10 @@ func (a *App) devicesSection(c *ui.Context, pal *palette, b Backend) {
 				if i > 0 {
 					ui.Box(c).Height(1).Background(pal.divider).Margin(0, 10)
 				}
+				if b != nil && a.renaming == d.ID {
+					a.renameRow(c, pal, b, d)
+					continue
+				}
 				ui.Row(c.Key(d.ID)).AlignItems(ui.Center).Gap(12).Padding(10, 12).Children(func() {
 					ui.Column(c).Grow(1).MinWidth(0).Gap(2).Children(func() {
 						ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
@@ -438,6 +442,9 @@ func (a *App) devicesSection(c *ui.Context, pal *palette, b Backend) {
 					if b == nil {
 						return
 					}
+					if ui.Button(c, a.t("重命名", "Rename")).Clicked() {
+						a.renaming, a.renameText = d.ID, d.Name
+					}
 					if d.Revoked {
 						if ui.Button(c, a.t("删除", "Delete")).Clicked() {
 							_ = b.DeleteDevice(d.ID)
@@ -451,6 +458,27 @@ func (a *App) devicesSection(c *ui.Context, pal *palette, b Backend) {
 				})
 			}
 		})
+	})
+}
+
+// renameRow edits a device's name in place. Enter or Save keeps it; the token stays.
+func (a *App) renameRow(c *ui.Context, pal *palette, b Backend, d model.Device) {
+	ui.Row(c.Key(d.ID)).AlignItems(ui.Center).Gap(8).Padding(8, 12).Children(func() {
+		submitted := ui.TextInput(c.Key("rename"), &a.renameText).Placeholder(d.Name).AutoFocus().Grow(1).MinWidth(0).Submitted()
+		if ui.Button(c, a.t("取消", "Cancel")).Clicked() {
+			a.renaming = 0
+		}
+		name := strings.TrimSpace(a.renameText)
+		save := ui.PrimaryButton(c, a.t("保存", "Save")).Disabled(name == "" || name == d.Name).Clicked()
+		if (save || submitted) && name != "" {
+			if err := b.RenameDevice(d.ID, name); err != nil {
+				a.toast = err.Error()
+				return
+			}
+			a.renaming = 0
+			a.toast = a.t("已重命名", "Renamed")
+			a.Refresh()
+		}
 	})
 }
 
