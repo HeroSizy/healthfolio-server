@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"net"
+	"net/netip"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -198,4 +199,16 @@ func lanIP() string {
 
 func isLAN(ip net.IP) bool {
 	return ip != nil && (ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast() || isTailscale(ip))
+}
+
+// isLANAddr is isLAN for an address as it comes from RemoteAddr. It understands IPv6 zones
+// ("fe80::1%en0": a .local name often resolves to the link-local IPv6 address, and
+// net.ParseIP returns nil for it) and IPv4-mapped IPv6 ("::ffff:192.168.1.5").
+func isLANAddr(s string) bool {
+	a, err := netip.ParseAddr(s)
+	if err != nil {
+		return false
+	}
+	a = a.WithZone("").Unmap()
+	return isLAN(net.IP(a.AsSlice()))
 }

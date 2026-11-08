@@ -190,7 +190,7 @@ func (s *Server) authDevice(r *http.Request) (string, bool) {
 // State-changing calls must carry X-HealthSync: 1, which a cross-site form can't send.
 func (s *Server) admin(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if s.cfg.DashboardLAN && !isLAN(net.ParseIP(clientIP(r))) {
+		if s.cfg.DashboardLAN && !isLANAddr(clientIP(r)) {
 			http.Error(w, "The dashboard is only available on the local network.", http.StatusForbidden)
 			return
 		}
@@ -419,7 +419,7 @@ func (s *Server) handleReport(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handlePair(w http.ResponseWriter, r *http.Request) {
 	ip := clientIP(r)
-	if !isLAN(net.ParseIP(ip)) {
+	if !isLANAddr(ip) {
 		// Log it with the address, so "why was I refused" can be answered from the history.
 		s.db.Log(LogEntry{Kind: "pair", IP: ip, Message: "refused: not from the local network or Tailscale"})
 		logf("pair refused: %s is not a local network or Tailscale address", ip)

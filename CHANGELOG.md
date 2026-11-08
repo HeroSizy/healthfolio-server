@@ -3,6 +3,13 @@
 Releases happen on their own: bump `version` in mygo.json, add its section here, push to
 main. The desktop app shows the section of a new version in its update window.
 
+## 0.0.4
+
+- Fix: pairing was refused as "not from the local network" when the iPhone reached the
+  computer through its link-local IPv6 address (what a `.local` name often resolves to,
+  like `fe80::…%en0`). IPv6 with a zone and IPv4-mapped IPv6 addresses now count as local.
+  The dashboard's "local network only" setting uses the same check.
+
 ## 0.0.3
 
 - Pairing without a code no longer fails at once when the Allow dialog cannot be shown (a

@@ -1,7 +1,7 @@
 {
   "name": "HealthSync",
   "identifier": "com.herosizy.healthsync",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "copyright": "Copyright © 2026 HeroSizy",
   "publisher": "HeroSizy",
   "main": "./cmd/healthsync",

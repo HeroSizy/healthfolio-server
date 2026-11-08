@@ -186,3 +186,25 @@ func TestPairRefusedOutsideLANHasReason(t *testing.T) {
 		t.Fatalf("got %d %v", w.Code, r)
 	}
 }
+
+func TestIsLANAddr(t *testing.T) {
+	for addr, want := range map[string]bool{
+		"192.168.2.7":                  true,
+		"10.0.0.5":                     true,
+		"127.0.0.1":                    true,
+		"::1":                          true,
+		"fe80::48e:feb8:e302:6cb8%en0": true, // .local resolved to link-local IPv6
+		"fe80::1":                      true,
+		"fdf3:98db:df65:4f07::1":       true, // ULA
+		"::ffff:192.168.1.5":           true, // IPv4-mapped
+		"100.102.73.20":                true, // Tailscale
+		"203.0.113.9":                  false,
+		"2001:db8::1":                  false,
+		"::ffff:8.8.8.8":               false,
+		"not an ip":                    false,
+	} {
+		if got := isLANAddr(addr); got != want {
+			t.Errorf("isLANAddr(%q) = %v, want %v", addr, got, want)
+		}
+	}
+}
