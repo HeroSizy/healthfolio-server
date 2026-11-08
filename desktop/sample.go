@@ -50,6 +50,13 @@ func (s *Sample) Overview() model.Overview {
 			{Type: "HKQuantityTypeIdentifierOxygenSaturation", Count: 640}, {Type: "HKQuantityTypeIdentifierBodyMass", Count: 88},
 		}},
 		Activity: act, Devices: 2, Reports: 3, LastSync: &last, PairModes: []string{"dialog", "code"}, MCPEnabled: !s.mcpOff,
+		Storage: model.Storage{Total: 542_410_000, DiskFree: 187_300_000_000, DiskSize: 494_380_000_000, Parts: []model.StoragePart{
+			{Kind: "database", Bytes: 534_800_000, Files: 3, Path: "~/Library/Application Support/HealthSync/health.db"},
+			{Kind: "reports", Bytes: 7_350_000, Files: 9, Path: "~/Library/Application Support/HealthSync/reports"},
+			{Kind: "chats", Bytes: 246_000, Files: 14, Path: "~/Library/Application Support/HealthSync/chats"},
+			{Kind: "settings", Bytes: 3_100, Files: 1, Path: "~/Library/Application Support/HealthSync/settings"},
+			{Kind: "other", Bytes: 11_000, Files: 3, Path: "~/Library/Application Support/HealthSync"},
+		}},
 	}
 }
 

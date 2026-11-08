@@ -333,6 +333,9 @@ func (s *Server) handleBackupSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	dropped := dropSecrets(v, "")
+	if dropped == nil {
+		dropped = []string{}
+	}
 	saved := map[string]any{"device": dev.Name, "device_id": dev.DeviceID, "saved": nowISO(), "settings": v}
 	b, _ := json.MarshalIndent(saved, "", "  ")
 	if err := writeFileAtomic(s.settingsFile(dev), b); err != nil {

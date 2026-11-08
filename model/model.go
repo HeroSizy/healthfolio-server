@@ -114,6 +114,25 @@ type Overview struct {
 	PairModes    []string   `json:"pair_modes"`
 	Password     bool       `json:"password"`
 	MCPEnabled   bool       `json:"mcp_enabled"`
+	Storage      Storage    `json:"storage"`
+}
+
+// Storage is how much room the data takes, by kind, and how much the disk has left.
+type Storage struct {
+	Total int64         `json:"total"` // bytes, all parts
+	Parts []StoragePart `json:"parts"`
+	// DiskFree and DiskSize are of the disk holding the data folder; 0 when unknown.
+	DiskFree int64 `json:"disk_free"`
+	DiskSize int64 `json:"disk_size"`
+}
+
+type StoragePart struct {
+	// Kind is "database" (health.db with its -wal and -shm), "reports", "chats",
+	// "settings", "csv" or "other".
+	Kind  string `json:"kind"`
+	Bytes int64  `json:"bytes"`
+	Files int    `json:"files"`
+	Path  string `json:"path"`
 }
 
 // PairInfo is an active one-time pairing code and the link its QR code encodes.

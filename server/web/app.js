@@ -23,6 +23,8 @@ const ZH = {
   "pend.title": "有设备请求配对", "pend.allow": "允许", "pend.deny": "拒绝", "pend.from": "来自",
   "pend.confirm": "手机上显示的确认码一致时再允许",
   "ev.ingest": "同步数据", "ev.report": "体检报告", "ev.pair": "配对", "ev.auth": "令牌错误", "ev.hook": "钩子", "ev.backup": "备份",
+  "st.title": "存储空间", "st.total": "共 {n}", "st.disk": "磁盘剩余 {free} / {size}", "st.files": "{n} 个文件",
+  "st.database": "健康数据库", "st.reports": "体检报告", "st.chats": "AI 对话备份", "st.settings": "App 设置备份", "st.csv": "CSV 文件", "st.other": "其它",
   "ok": "成功", "fail": "失败", "never": "从未", "none": "还没有记录。", "types": "种类型",
   "srv.address": "手机连接地址", "srv.data": "数据目录", "srv.outputs": "存储", "srv.version": "版本", "srv.started": "启动于",
   "srv.pairing": "配对方式", "srv.password": "控制面板密码", "yes": "已设置", "no": "未设置（仅局域网可访问）",
@@ -42,6 +44,8 @@ const EN_FALLBACK = {
   "rep.none": "No checkup reports yet.", "pend.title": "A device wants to pair", "pend.allow": "Allow", "pend.deny": "Deny", "pend.from": "from",
   "pend.confirm": "Allow only if the phone shows the same code",
   "ev.ingest": "Data", "ev.report": "Checkup", "ev.pair": "Pairing", "ev.auth": "Bad token", "ev.hook": "Hook", "ev.backup": "Backup",
+  "st.title": "Storage", "st.total": "{n} in all", "st.disk": "{free} free of {size}", "st.files": "{n} files",
+  "st.database": "Health database", "st.reports": "Checkups", "st.chats": "AI chat backups", "st.settings": "App settings backups", "st.csv": "CSV files", "st.other": "Other",
   "ok": "OK", "fail": "Failed", "never": "Never", "none": "Nothing yet.", "types": "types",
   "srv.address": "Address for phones", "srv.data": "Data directory", "srv.outputs": "Storage", "srv.version": "Version", "srv.started": "Started",
   "srv.pairing": "Pairing", "srv.password": "Dashboard password", "yes": "set", "no": "not set (LAN only)",
@@ -162,6 +166,28 @@ async function loadOverview() {
     [t("srv.version"), `${esc(o.version)} · ${esc(o.os)} · protocol ${o.protocol}`],
     [t("srv.started"), when(o.started)],
   ].map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("");
+  renderStorage(o.storage);
+}
+const ST_COLORS = ["var(--accent)", "#3fb27f", "#5b8def", "#c08be8", "#e0a243", "var(--muted)"];
+function fmtBytes(n) {
+  const u = ["B", "KB", "MB", "GB", "TB"];
+  let i = 0;
+  while (n >= 1000 && i < u.length - 1) { n /= 1000; i++; }
+  return (i === 0 || n >= 100 ? n.toFixed(0) : n.toFixed(1)) + " " + u[i];
+}
+function renderStorage(st) {
+  const parts = (st && st.parts) || [];
+  $("#storage-card").hidden = parts.length === 0;
+  if (!parts.length) return;
+  let sub = t("st.total").replace("{n}", fmtBytes(st.total));
+  if (st.disk_size) sub += " · " + t("st.disk").replace("{free}", fmtBytes(st.disk_free)).replace("{size}", fmtBytes(st.disk_size));
+  $("#storage-sub").textContent = sub;
+  $("#storage-bar").innerHTML = parts.filter(p => p.bytes > 0).map((p, i) =>
+    `<span style="flex:${p.bytes / st.total};background:${ST_COLORS[Math.min(parts.indexOf(p), ST_COLORS.length - 1)]}" title="${esc(t("st." + p.kind))}"></span>`).join("");
+  $("#storage-rows").innerHTML = parts.map((p, i) =>
+    `<tr><td class="nowrap"><i class="dot" style="background:${ST_COLORS[Math.min(i, ST_COLORS.length - 1)]}"></i>${esc(t("st." + p.kind))}</td>
+      <td class="path" title="${esc(p.path)}"><code>${esc(p.path)}</code></td>
+      <td class="num muted nowrap">${p.files === 1 && lang !== "zh" ? "1 file" : t("st.files").replace("{n}", fmtNum(p.files))}</td><td class="num nowrap"><b>${fmtBytes(p.bytes)}</b></td></tr>`).join("");
 }
 function renderTypes() {
   const q = $("#type-filter").value.toLowerCase();

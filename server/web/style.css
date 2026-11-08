@@ -114,3 +114,13 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 1
 .cfg-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
 .cfg-head button { padding: 3px 10px; font-size: 13px; }
 .confirm-code { font-size: 28px; font-weight: 700; letter-spacing: 6px; font-variant-numeric: tabular-nums; }
+.stbar { display: flex; height: 10px; border-radius: 5px; overflow: hidden; background: var(--line, rgba(127,127,127,.15)); margin: 6px 0 12px; }
+.stbar span { min-width: 2px; }
+.sttable { width: 100%; border-collapse: collapse; font-size: 14px; table-layout: fixed; }
+.sttable td { padding: 6px 0; }
+.sttable td:first-child { width: 190px; }
+.sttable td.num { width: 90px; text-align: right; font-variant-numeric: tabular-nums; }
+.sttable td.path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-right: 12px; }
+.sttable td.path code { font-size: 12px; color: var(--muted); }
+.sttable .dot { display: inline-block; width: 8px; height: 8px; border-radius: 4px; margin-right: 8px; }
+@media (max-width: 600px) { .sttable td.path { display: none; } }

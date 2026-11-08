@@ -64,8 +64,64 @@ func (a *App) overviewPage(c *ui.Context, pal *palette) {
 					}, func() { a.dailyChart(c, pal) })
 				})
 			})
+			a.storageSection(c, pal, o.Storage)
 		})
 	})
+}
+
+var storageKinds = map[string][2]string{
+	"database": {"健康数据库", "Health database"}, "reports": {"体检报告", "Checkups"},
+	"chats": {"AI 对话备份", "AI chat backups"}, "settings": {"App 设置备份", "App settings backups"},
+	"csv": {"CSV 文件", "CSV files"}, "other": {"其它", "Other"},
+}
+
+// storageSection shows how much room the data takes, by kind, and what the disk has left.
+func (a *App) storageSection(c *ui.Context, pal *palette, st model.Storage) {
+	if len(st.Parts) == 0 {
+		return
+	}
+	sub := a.t("共 ", "") + bytesLabel(st.Total) + a.t("", " in all")
+	if st.DiskSize > 0 {
+		sub += a.t(" · 磁盘剩余 ", " · ") + bytesLabel(st.DiskFree) + a.t(" / ", " free of ") + bytesLabel(st.DiskSize)
+	}
+	colors := []ui.Color{pal.accent, pal.ok, ui.Hex("#5b8def"), ui.Hex("#c08be8"), ui.Hex("#e0a243"), pal.textFaint}
+	a.section(c, pal, a.t("存储空间", "Storage"), sub, nil, func() {
+		ui.Column(c).Gap(12).Padding(14, 16).Radius(12).Background(pal.inset).Children(func() {
+			// one bar: the parts side by side, by size
+			ui.Row(c).Height(10).Radius(5).Clip().Background(pal.text.Alpha(0.08)).Children(func() {
+				for i, p := range st.Parts {
+					if p.Bytes > 0 && st.Total > 0 {
+						ui.Box(c).Grow(float32(p.Bytes) / float32(st.Total)).Basis(0).MinWidth(2).Height(10).Background(colors[min(i, len(colors)-1)])
+					}
+				}
+			})
+			for i, p := range st.Parts {
+				name := storageKinds[p.Kind]
+				ui.Row(c.Key("st-"+p.Kind)).AlignItems(ui.Center).Gap(10).Children(func() {
+					ui.Box(c).Size(8, 8).Radius(4).Background(colors[min(i, len(colors)-1)]).Shrink(0)
+					ui.Text(c, firstNonEmpty(a.t(name[0], name[1]), p.Kind)).FontSize(13).TextColor(pal.text).Width(130).Shrink(0)
+					ui.Text(c, p.Path).FontSize(11).Font("monospace").TextColor(pal.textFaint).Grow(1).MinWidth(0).SingleLine().Ellipsis("…").Tooltip(p.Path)
+					ui.Text(c, plural(p.Files, a.zh, "个文件", "file")).FontSize(12).TextColor(pal.textMuted).Shrink(0)
+					ui.Text(c, bytesLabel(p.Bytes)).FontSize(13).FontWeight(600).TextColor(pal.text).Width(80).TextAlign(ui.End).Shrink(0)
+				})
+			}
+		})
+	})
+}
+
+// bytesLabel is a size such as 465 MB or 1.2 GB.
+func bytesLabel(n int64) string {
+	units := []string{"B", "KB", "MB", "GB", "TB"}
+	f := float64(n)
+	i := 0
+	for f >= 1000 && i < len(units)-1 {
+		f /= 1000
+		i++
+	}
+	if i == 0 || f >= 100 {
+		return fmt.Sprintf("%.0f %s", f, units[i])
+	}
+	return fmt.Sprintf("%.1f %s", f, units[i])
 }
 
 // tile is a number with its label, rising in as the page opens.

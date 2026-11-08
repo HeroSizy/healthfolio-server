@@ -43,6 +43,7 @@ type Server struct {
 	mcp     *MCP
 	started time.Time
 	mux     *http.ServeMux
+	stor    storageCache
 }
 
 func NewServer(cfg *Config, db *DB, token string) (*Server, error) {
@@ -740,6 +741,7 @@ func (s *Server) overview(base string) model.Overview {
 		Started: s.started.Format(time.RFC3339), BaseURL: base, TailscaleURL: TailscaleURL(s.cfg.Port), MCPURL: base + "/mcp", DataDir: s.cfg.DataDir,
 		Outputs: outputs, Stats: st, Activity: act, Devices: active, Reports: len(reps),
 		PairModes: s.dialogModes(), Password: s.cfg.AdminPassword != "", MCPEnabled: s.db.MCPEnabled(),
+		Storage: s.storage(),
 	}
 	if len(last) > 0 {
 		o.LastSync = &last[0]

@@ -3,6 +3,12 @@
 Releases happen on their own: bump `version` in mygo.json, add its section here, push to
 main. The desktop app shows the section of a new version in its update window.
 
+## 0.0.8
+
+- The overview of the app and of the dashboard shows how much room the data takes: in all
+  and by kind (health database, checkups, AI chat backups, app settings backups, CSV
+  files, other), with how much the disk has left.
+
 ## 0.0.7
 
 - Deleting a conversation in the iPhone app also deletes its backup on this computer
