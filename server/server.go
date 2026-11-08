@@ -13,6 +13,7 @@ import (
 	"io/fs"
 	"net"
 	"net/http"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"sort"
@@ -92,6 +93,15 @@ func (s *Server) routes() {
 	m.HandleFunc("POST /ingest", s.handleIngest)
 	m.HandleFunc("POST /report", s.handleReport)
 	m.HandleFunc("POST /pair", s.handlePair)
+	m.HandleFunc("POST /pair/requests", s.handlePairRequest)
+	m.HandleFunc("GET /pair/requests/{id}", s.handlePairPoll)
+	m.HandleFunc("DELETE /pair/requests/{id}", s.handlePairWithdraw)
+	m.HandleFunc("GET /auth", s.handleAuth)
+	m.HandleFunc("POST /backup/chats", s.handleBackupChats)
+	m.HandleFunc("GET /backup/chats", s.handleListChats)
+	m.HandleFunc("GET /backup/chats/{id}", s.handleGetChat)
+	m.HandleFunc("POST /backup/settings", s.handleBackupSettings)
+	m.HandleFunc("GET /backup/settings", s.handleGetSettings)
 	m.HandleFunc("POST /mcp", s.handleMCP)
 	m.HandleFunc("GET /mcp", s.handleMCP)
 	m.HandleFunc("DELETE /mcp", s.handleMCP)
@@ -158,43 +168,96 @@ func clientIP(r *http.Request) string {
 }
 
 func (s *Server) dialogModes() []string {
-	if s.cfg.NoDialog {
-		return []string{"code"}
-	}
 	// The app shows "click Allow on the computer" for dialog mode. On macOS a native
-	// dialog pops up; on other systems approve it in the dashboard.
-	if osTag() == "mac" || envBool("HEALTHSYNC_DASHBOARD_APPROVAL") {
+	// dialog pops up (unless -no-dialog); anywhere, HEALTHSYNC_DASHBOARD_APPROVAL lets the
+	// desktop app or the dashboard approve it.
+	if (osTag() == "mac" && !s.cfg.NoDialog) || envBool("HEALTHSYNC_DASHBOARD_APPROVAL") {
 		return []string{"dialog", "code"}
 	}
 	return []string{"code"}
 }
 
-// authDevice checks the bearer token. It returns the device name to show in the log.
-func (s *Server) authDevice(r *http.Request) (string, bool) {
-	h := r.Header.Get("Authorization")
-	tok, ok := strings.CutPrefix(h, "Bearer ")
-	if !ok || tok == "" {
-		return "", false
+func bearer(r *http.Request) string {
+	tok, _ := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+	return strings.TrimSpace(tok)
+}
+
+// authDevice checks the bearer token and returns its owner. The shared token counts as a
+// device named "shared token".
+func (s *Server) authDevice(r *http.Request) (Device, bool) {
+	tok := bearer(r)
+	if tok == "" {
+		return Device{}, false
 	}
 	if subtle.ConstantTimeCompare([]byte(tok), []byte(s.token)) == 1 {
-		return "", true
+		return Device{Name: "shared token", Scope: scopeDevice}, true
 	}
 	if d, ok := s.db.DeviceForToken(tok); ok {
 		s.db.TouchDevice(d.ID, clientIP(r))
-		return d.Name, true
+		return d, true
 	}
-	return "", false
+	return Device{}, false
+}
+
+// authPhone is authDevice for calls only a phone may make (sending data, making AI
+// tokens): an AI assistant's read-only token is refused with 403.
+func (s *Server) authPhone(w http.ResponseWriter, r *http.Request, what string) (Device, bool) {
+	d, ok := s.authDevice(r)
+	if !ok {
+		s.db.Log(LogEntry{Kind: "auth", IP: clientIP(r), Message: "bad token on " + what})
+		logf("rejected: bad token on %s (from %s)", what, clientIP(r))
+		writeJSON(w, 401, map[string]any{"error": "bad token", "reason": "bad_token"})
+		return d, false
+	}
+	if d.Scope != scopeDevice {
+		s.db.Log(LogEntry{Kind: "auth", Device: d.Name, IP: clientIP(r), Message: "read-only AI token used on " + what})
+		writeJSON(w, 403, map[string]any{"error": "this token is read-only (AI assistant)", "reason": "read_only"})
+		return d, false
+	}
+	return d, true
+}
+
+// handleAuth tells the app whether its token still works: GET /auth.
+func (s *Server) handleAuth(w http.ResponseWriter, r *http.Request) {
+	tok := bearer(r)
+	if tok == "" {
+		writeJSON(w, 401, map[string]any{"ok": false, "reason": "missing"})
+		return
+	}
+	server := map[string]any{"name": s.cfg.Name, "version": version, "protocol": protocolVersion}
+	if subtle.ConstantTimeCompare([]byte(tok), []byte(s.token)) == 1 {
+		writeJSON(w, 200, map[string]any{"ok": true, "scope": scopeDevice, "device": map[string]any{"name": "shared token"}, "server": server})
+		return
+	}
+	d, found := s.db.LookupToken(tok)
+	switch {
+	case !found:
+		writeJSON(w, 401, map[string]any{"ok": false, "reason": "unknown", "server": server})
+	case d.Revoked:
+		writeJSON(w, 401, map[string]any{"ok": false, "reason": "revoked", "server": server})
+	default:
+		s.db.TouchDevice(d.ID, clientIP(r))
+		writeJSON(w, 200, map[string]any{"ok": true, "scope": d.Scope, "device": map[string]any{"id": d.ID, "name": d.Name}, "server": server})
+	}
 }
 
 // admin guards the dashboard: LAN only by default, plus an optional password.
 // State-changing calls must carry X-HealthSync: 1, which a cross-site form can't send.
 func (s *Server) admin(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if s.cfg.DashboardLAN && !isLANAddr(clientIP(r)) {
+		ip := clientIP(r)
+		if s.cfg.DashboardLAN && !isLANAddr(ip) {
 			http.Error(w, "The dashboard is only available on the local network.", http.StatusForbidden)
 			return
 		}
-		if s.cfg.AdminPassword != "" {
+		local := isLoopback(ip)
+		if !local && s.cfg.AdminPassword == "" && !s.cfg.DashboardNoPassword {
+			// Everyone on the Wi-Fi (guests too) or the tailnet could otherwise read all
+			// the health data and the shared token. This computer itself needs no password.
+			s.needPassword(w, r)
+			return
+		}
+		if !local && s.cfg.AdminPassword != "" {
 			_, pw, ok := r.BasicAuth()
 			if !ok || subtle.ConstantTimeCompare([]byte(pw), []byte(s.cfg.AdminPassword)) != 1 {
 				w.Header().Set("WWW-Authenticate", `Basic realm="HealthSync"`)
@@ -212,6 +275,36 @@ func (s *Server) admin(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
+func isLoopback(ip string) bool {
+	a, err := netip.ParseAddr(ip)
+	return err == nil && a.WithZone("").Unmap().IsLoopback()
+}
+
+// needPassword explains that the dashboard needs a password before other computers may
+// open it.
+func (s *Server) needPassword(w http.ResponseWriter, r *http.Request) {
+	if !strings.Contains(r.Header.Get("Accept"), "text/html") {
+		writeJSON(w, 403, map[string]any{"error": "set a dashboard password to open the dashboard from another computer", "reason": "password_not_set"})
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusForbidden)
+	_, _ = io.WriteString(w, needPasswordPage)
+}
+
+const needPasswordPage = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>HealthSync</title><style>
+:root{color-scheme:light dark}body{font:15px/1.6 -apple-system,system-ui,sans-serif;max-width:560px;margin:12vh auto;padding:0 20px}
+h1{font-size:20px}code{background:rgba(127,127,127,.15);padding:1px 5px;border-radius:4px}p{opacity:.85}</style></head><body>
+<h1>先给面板设个密码 · Set a dashboard password first</h1>
+<p>面板里有全部健康数据。为了不让同一 Wi‑Fi 或 Tailscale 里的其他人看到，从别的电脑打开面板前需要先设密码：</p>
+<ul><li>桌面版 HealthSync：在运行它的电脑上打开「设置 › 网页面板密码」。</li>
+<li>服务器版：设置环境变量 <code>HEALTHSYNC_ADMIN_PASSWORD</code>（或 <code>-admin-password</code>）后重启。</li></ul>
+<p>在运行 HealthSync 的这台电脑上用 <code>http://127.0.0.1</code> 打开不需要密码。</p>
+<hr><p>The dashboard shows all of your health data, so opening it from another computer needs a password.
+Desktop app: Settings › Dashboard password, on the computer running it. Server: set <code>HEALTHSYNC_ADMIN_PASSWORD</code> and restart.
+On the computer running HealthSync, <code>http://127.0.0.1</code> works without one.</p></body></html>`
+
 // ---------------------------------------------------------------- app API
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -226,6 +319,9 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		"ok": true, "name": s.cfg.Name, "version": protocolVersion, "os": osTag(),
 		"pair_modes": s.dialogModes(), "stores": stores, "server": "healthsync-server/" + version,
 		"records": recordsVersion, "urls": s.urls(r), "mcp_enabled": s.db.MCPEnabled(),
+		// what this server can do beyond protocol 2: two-step pairing with a confirmation
+		// code, GET /auth, pairing again by device_id, and backups of AI chats and settings
+		"features": []string{"pair_requests", "auth", "device_id", "chats", "settings"},
 	}
 	if s.db.MCPEnabled() {
 		out["mcp"] = "/mcp"
@@ -249,16 +345,11 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	ip := clientIP(r)
-	device, ok := s.authDevice(r)
+	dev, ok := s.authPhone(w, r, "/ingest")
 	if !ok {
-		logf("rejected: bad token (from %s)", ip)
-		s.db.Log(LogEntry{Kind: "auth", IP: ip, OK: false, Message: "bad token on /ingest"})
-		errJSON(w, 401, "bad token")
 		return
 	}
-	if device == "" {
-		device = "shared token"
-	}
+	device := dev.Name
 	if r.ContentLength > maxIngestBody {
 		errJSON(w, 400, "bad length")
 		return
@@ -350,17 +441,26 @@ func safeName(s string) string {
 	return s
 }
 
+// folderReportID is the id in folder/report.json, "" when there is none.
+func folderReportID(folder string) string {
+	b, err := os.ReadFile(filepath.Join(folder, "report.json"))
+	if err != nil {
+		return ""
+	}
+	var rep struct {
+		ID string `json:"id"`
+	}
+	_ = json.Unmarshal(b, &rep)
+	return rep.ID
+}
+
 func (s *Server) handleReport(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
-	device, ok := s.authDevice(r)
+	dev, ok := s.authPhone(w, r, "/report")
 	if !ok {
-		s.db.Log(LogEntry{Kind: "auth", IP: clientIP(r), Message: "bad token on /report"})
-		errJSON(w, 401, "bad token")
 		return
 	}
-	if device == "" {
-		device = "shared token"
-	}
+	device := dev.Name
 	var req struct {
 		Report *Report `json:"report"`
 		Folder string  `json:"folder"`
@@ -378,6 +478,15 @@ func (s *Server) handleReport(w http.ResponseWriter, r *http.Request) {
 		name = "report-" + time.Now().Format("20060102-150405")
 	}
 	folder := filepath.Join(s.cfg.DataDir, "reports", name)
+	if other := folderReportID(folder); other != "" && req.Report.ID != "" && other != req.Report.ID {
+		// another report already has this folder name: don't overwrite its files
+		suffix := safeName(req.Report.ID)
+		if r := []rune(suffix); len(r) > 8 {
+			suffix = string(r[:8])
+		}
+		name += "-" + suffix
+		folder = filepath.Join(s.cfg.DataDir, "reports", name)
+	}
 	if err := os.MkdirAll(folder, 0o700); err != nil {
 		errJSON(w, 500, err.Error())
 		return
@@ -403,10 +512,16 @@ func (s *Server) handleReport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	n, err := s.db.InsertReport(*req.Report, name, folder)
-	stores := map[string]any{"sqlite": n}
 	if err != nil {
-		stores["sqlite"] = "error: " + err.Error()
+		// The files are saved, but the report is not in the database: fail, so the app
+		// sends it again (sending a report again replaces it).
+		s.db.Log(LogEntry{Kind: "report", Device: device, IP: clientIP(r), Received: len(req.Report.Items),
+			Message: name + ": sqlite: " + err.Error(), DurationMS: int(time.Since(start).Milliseconds())})
+		telemetry.Errorf("report", err.Error())
+		errJSON(w, 500, "sqlite: "+err.Error())
+		return
 	}
+	stores := map[string]any{"sqlite": n}
 	if s.hook != nil {
 		s.hook.Report(folder)
 		stores["hook"] = "queued"
@@ -419,56 +534,178 @@ func (s *Server) handleReport(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handlePair(w http.ResponseWriter, r *http.Request) {
 	ip := clientIP(r)
-	if !isLANAddr(ip) {
-		// Log it with the address, so "why was I refused" can be answered from the history.
-		s.db.Log(LogEntry{Kind: "pair", IP: ip, Message: "refused: not from the local network or Tailscale"})
-		logf("pair refused: %s is not a local network or Tailscale address", ip)
-		pairErr(w, 403, "not_local", "pairing is only allowed from the local network", map[string]any{"ip": ip})
+	if !s.pairAllowed(w, r) {
 		return
 	}
-	var req struct {
-		Device string `json:"device"`
-		Code   string `json:"code"`
-	}
-	_ = json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&req)
-	device := strings.TrimSpace(req.Device)
-	if device == "" {
-		device = "iPhone"
-	}
-	if r := []rune(device); len(r) > 60 {
-		device = string(r[:60])
-	}
-	issue := func(how string) {
-		tok := newToken()
-		if err := s.db.AddDevice(device, tok, ip); err != nil {
-			errJSON(w, 500, err.Error())
-			return
-		}
-		s.db.Log(LogEntry{Kind: "pair", Device: device, IP: ip, OK: true, Message: how})
-		logf("paired %s (%s) by %s", device, ip, how)
-		writeJSON(w, 200, map[string]any{"token": tok, "name": s.cfg.Name, "version": protocolVersion, "urls": s.urls(r)})
-	}
+	req := readPairRequest(r)
 	if strings.TrimSpace(req.Code) != "" {
 		if s.pair.Check(req.Code) {
-			issue("code")
+			s.issue(w, r, req.Device, req.DeviceID, "code", nil)
 			return
 		}
-		s.db.Log(LogEntry{Kind: "pair", Device: device, IP: ip, Message: "wrong or expired code"})
+		s.db.Log(LogEntry{Kind: "pair", Device: req.Device, IP: ip, Message: "wrong or expired code"})
 		pairErr(w, 403, "wrong_code", "配对码不对或已过期 / wrong or expired code", nil)
 		return
 	}
-	modes := s.dialogModes()
-	if modes[0] != "dialog" {
+	// Without a code, in one long request (older apps; newer ones use /pair/requests).
+	pp, ok := s.openRequest(w, r, req)
+	if !ok {
+		return
+	}
+	_, status, _ := s.pair.Wait(r.Context(), pp.ID, requestTTL)
+	if status == reqApproved && s.pair.Claim(pp.ID) {
+		s.issue(w, r, req.Device, req.DeviceID, "approved", nil)
+		return
+	}
+	if status == reqPending { // the phone hung up
+		s.pair.Withdraw(pp.ID)
+	}
+	s.db.Log(LogEntry{Kind: "pair", Device: req.Device, IP: ip, Message: status})
+	pairErr(w, 403, "not_approved", "电脑上没有点「允许」 / not approved", map[string]any{"status": status})
+}
+
+type pairRequest struct {
+	Device   string `json:"device"`
+	DeviceID string `json:"device_id"`
+	Code     string `json:"code"`
+}
+
+func readPairRequest(r *http.Request) pairRequest {
+	var req pairRequest
+	_ = json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&req)
+	req.Device = strings.TrimSpace(req.Device)
+	if req.Device == "" {
+		req.Device = "iPhone"
+	}
+	if rr := []rune(req.Device); len(rr) > 60 {
+		req.Device = string(rr[:60])
+	}
+	req.DeviceID = strings.TrimSpace(req.DeviceID)
+	if len(req.DeviceID) > 128 {
+		req.DeviceID = req.DeviceID[:128]
+	}
+	return req
+}
+
+// issue makes a token for a phone that may pair and answers with it.
+func (s *Server) issue(w http.ResponseWriter, r *http.Request, device, deviceID, how string, extra map[string]any) {
+	ip := clientIP(r)
+	tok := newToken()
+	dev, repaired, err := s.db.AddDevice(device, tok, ip, deviceID, scopeDevice)
+	if err != nil {
+		errJSON(w, 500, err.Error())
+		return
+	}
+	msg := how
+	if repaired {
+		msg += ", paired again (earlier token replaced)"
+	}
+	s.db.Log(LogEntry{Kind: "pair", Device: device, IP: ip, OK: true, Message: msg})
+	logf("paired %s (%s) by %s", device, ip, msg)
+	out := map[string]any{"token": tok, "name": s.cfg.Name, "version": protocolVersion, "urls": s.urls(r),
+		"device": map[string]any{"id": dev.ID, "name": dev.Name}, "repaired": repaired}
+	for k, v := range extra {
+		out[k] = v
+	}
+	writeJSON(w, 200, out)
+}
+
+// openRequest starts a request to pair without a code, or answers why it can't.
+func (s *Server) openRequest(w http.ResponseWriter, r *http.Request, req pairRequest) (*PendingPair, bool) {
+	ip := clientIP(r)
+	if s.dialogModes()[0] != "dialog" {
 		writeJSON(w, 428, map[string]any{"error": "需要配对码 / pairing code required", "reason": "needs_code", "needs_code": true})
+		return nil, false
+	}
+	pp, retry, err := s.pair.Request(req.Device, req.DeviceID, ip, !s.cfg.NoDialog)
+	if err != nil {
+		secs := int(retry.Seconds()) + 1
+		w.Header().Set("Retry-After", strconv.Itoa(secs))
+		s.db.Log(LogEntry{Kind: "pair", Device: req.Device, IP: ip, Message: "refused: " + err.Error()})
+		pairErr(w, 429, "rate_limited", err.Error(), map[string]any{"retry_after": secs})
+		return nil, false
+	}
+	logf("pair request from %s (%s), confirmation code %s, waiting for approval", req.Device, ip, pp.Confirm)
+	s.notify(LogEntry{Kind: "pair_request", Device: req.Device, IP: ip, Message: pp.Confirm})
+	return pp, true
+}
+
+// notify tells the desktop app something changed without writing to the history.
+func (s *Server) notify(e LogEntry) {
+	if s.db.onLog != nil {
+		go s.db.onLog(e)
+	}
+}
+
+// POST /pair/requests: ask to pair without a code. 202 {id, confirm, expires_in}.
+func (s *Server) handlePairRequest(w http.ResponseWriter, r *http.Request) {
+	if !s.pairAllowed(w, r) {
 		return
 	}
-	logf("pair request from %s (%s), waiting for approval", device, ip)
-	if s.pair.Approve(r.Context(), device, ip, !s.cfg.NoDialog) {
-		issue("approved")
+	pp, ok := s.openRequest(w, r, readPairRequest(r))
+	if !ok {
 		return
 	}
-	s.db.Log(LogEntry{Kind: "pair", Device: device, IP: ip, Message: "denied or timed out"})
-	pairErr(w, 403, "not_approved", "电脑上没有点「允许」 / not approved", nil)
+	writeJSON(w, 202, map[string]any{"id": pp.ID, "confirm": pp.Confirm, "status": reqPending,
+		"expires_in": int(time.Until(pp.Expires).Seconds())})
+}
+
+// GET /pair/requests/{id}?wait=25: the state of a request, waiting for a change up to
+// wait seconds. An approved request answers with the token once.
+func (s *Server) handlePairPoll(w http.ResponseWriter, r *http.Request) {
+	if !s.pairAllowed(w, r) {
+		return
+	}
+	wait, _ := strconv.Atoi(r.URL.Query().Get("wait"))
+	wait = max(0, min(wait, 30))
+	id := r.PathValue("id")
+	pp, status, found := s.pair.Wait(r.Context(), id, time.Duration(wait)*time.Second)
+	if !found {
+		pairErr(w, 404, "unknown_request", "no such pairing request (expired, cancelled or already used)", nil)
+		return
+	}
+	switch status {
+	case reqApproved:
+		if !s.pair.Claim(id) {
+			pairErr(w, 404, "unknown_request", "this request was already used", nil)
+			return
+		}
+		s.issue(w, r, pp.Device, pp.DeviceID, "approved", map[string]any{"status": reqApproved})
+	case reqDenied:
+		s.db.Log(LogEntry{Kind: "pair", Device: pp.Device, IP: pp.IP, Message: "denied on the computer"})
+		pairErr(w, 403, "not_approved", "电脑上点了「拒绝」 / denied", map[string]any{"status": reqDenied})
+	case reqExpired:
+		pairErr(w, 410, "expired", "没有人在电脑上点「允许」，请求已过期 / expired", map[string]any{"status": reqExpired})
+	default:
+		writeJSON(w, 200, map[string]any{"status": reqPending, "confirm": pp.Confirm,
+			"expires_in": max(0, int(time.Until(pp.Expires).Seconds()))})
+	}
+}
+
+// DELETE /pair/requests/{id}: the phone cancelled.
+func (s *Server) handlePairWithdraw(w http.ResponseWriter, r *http.Request) {
+	if !s.pairAllowed(w, r) {
+		return
+	}
+	if !s.pair.Withdraw(r.PathValue("id")) {
+		pairErr(w, 404, "unknown_request", "no such pairing request", nil)
+		return
+	}
+	s.notify(LogEntry{Kind: "pair_request"})
+	writeJSON(w, 200, map[string]any{"ok": true})
+}
+
+// pairAllowed refuses pairing from outside the local network and Tailscale.
+func (s *Server) pairAllowed(w http.ResponseWriter, r *http.Request) bool {
+	ip := clientIP(r)
+	if isLANAddr(ip) {
+		return true
+	}
+	// Log it with the address, so "why was I refused" can be answered from the history.
+	s.db.Log(LogEntry{Kind: "pair", IP: ip, Message: "refused: not from the local network or Tailscale"})
+	logf("pair refused: %s is not a local network or Tailscale address", ip)
+	pairErr(w, 403, "not_local", "pairing is only allowed from the local network", map[string]any{"ip": ip})
+	return false
 }
 
 // ---------------------------------------------------------------- dashboard API
@@ -583,11 +820,11 @@ func (s *Server) apiNewDevice(w http.ResponseWriter, r *http.Request) {
 		name = "AI assistant"
 	}
 	tok := newToken()
-	if err := s.db.AddDevice(name, tok, clientIP(r)); err != nil {
+	if _, _, err := s.db.AddDevice(name, tok, clientIP(r), "", scopeMCP); err != nil {
 		errJSON(w, 500, err.Error())
 		return
 	}
-	s.db.Log(LogEntry{Kind: "pair", Device: name, IP: clientIP(r), OK: true, Message: "token created in dashboard"})
+	s.db.Log(LogEntry{Kind: "pair", Device: name, IP: clientIP(r), OK: true, Message: "AI token created in dashboard"})
 	writeJSON(w, 200, mcpConnect(s.cfg.Name, s.baseURL(r)+"/mcp", tok))
 }
 
@@ -724,6 +961,12 @@ func (s *Server) apiDaily(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, pts)
 }
 
+// apiToken shows the shared token, which can do anything a paired phone can: only on the
+// computer running the server.
 func (s *Server) apiToken(w http.ResponseWriter, r *http.Request) {
+	if !isLoopback(clientIP(r)) {
+		writeJSON(w, 403, map[string]any{"error": "the shared token is only shown on the computer running HealthSync", "reason": "local_only"})
+		return
+	}
 	writeJSON(w, 200, map[string]any{"token": s.token})
 }

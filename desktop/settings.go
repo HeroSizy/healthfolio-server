@@ -97,7 +97,7 @@ func (a *App) settingsPage(c *ui.Context, pal *palette) {
 				})
 			})
 			a.group(c, pal, a.t("网页控制面板", "Web dashboard"), a.t("局域网里的其它设备也可以用浏览器打开", "Other devices on your network can open it in a browser"), func() {
-				a.settingRow(c, pal, a.t("密码", "Password"), a.t("留空则只允许局域网访问，不需要密码", "Empty: LAN only, no password"), func() {
+				a.settingRow(c, pal, a.t("密码", "Password"), a.t("其它电脑打开面板时需要输入（用户名随意）。不设密码时只有这台电脑能打开", "Needed to open the dashboard from another computer (any user name). Without one, only this computer can open it"), func() {
 					changed = ui.TextInput(c.Key("pw"), &f.AdminPassword).Password().Width(200).Changed() || changed
 				})
 				if b, _ := a.host.Backend(); b != nil {

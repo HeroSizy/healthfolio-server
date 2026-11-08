@@ -206,6 +206,25 @@ func (h *host) onEvent(e model.LogEntry) {
 // ---------------------------------------------------------------- window and tray
 
 func (h *host) ready() {
+	if runtime.GOOS == "darwin" {
+		// The HealthSync menu in the menu bar, with "Check for Updates…" after About.
+		mygo.App.SetMenu(mygo.NewMenu([]*mygo.MenuItem{
+			{Label: "HealthSync", Submenu: []*mygo.MenuItem{
+				{Role: mygo.RoleAbout},
+				updater.MenuItem(),
+				mygo.Separator(),
+				{Role: mygo.RoleServices},
+				mygo.Separator(),
+				{Role: mygo.RoleHide},
+				{Role: mygo.RoleHideOthers},
+				{Role: mygo.RoleUnhide},
+				mygo.Separator(),
+				{Role: mygo.RoleQuit},
+			}},
+			{Role: mygo.RoleEditMenu},
+			{Role: mygo.RoleWindowMenu},
+		}))
+	}
 	h.win = mygo.NewWindow(mygo.WindowOptions{
 		Title: "HealthSync", Width: 1040, Height: 700, MinWidth: 760, MinHeight: 520,
 		TitleBarStyle: mygo.TitleBarHidden, Content: ui.View(h.app.View),

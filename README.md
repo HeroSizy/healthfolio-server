@@ -148,6 +148,7 @@ Each flag has an environment variable.
 | `-public-url` | `HEALTHSYNC_PUBLIC_URL` | The LAN IP address | The address in the QR code. |
 | `-admin-password` | `HEALTHSYNC_ADMIN_PASSWORD` | None | The dashboard password. Any user name is correct. |
 | `-dashboard-lan-only` | `HEALTHSYNC_DASHBOARD_ANYWHERE=1` turns it off | On | The dashboard accepts only LAN and loopback clients. |
+| `-dashboard-no-password` | `HEALTHSYNC_DASHBOARD_NO_PASSWORD=1` | Off | Other computers can open the dashboard without a password. |
 | `-csv` | `HEALTHSYNC_CSV` | Off | Also write `<dir>/YYYY-MM-DD.csv`. |
 | `-hook` | `HEALTHSYNC_HOOK` | Off | The command to run after data arrives. |
 | `-no-bonjour` | `HEALTHSYNC_NO_BONJOUR=1` | | Do not announce the server with Bonjour. |
@@ -167,7 +168,12 @@ The default data folder is:
 Use the server on your home network.
 
 - The server accepts pairing (`POST /pair`) only from private and loopback addresses.
+- Pairing without a code shows a 4-digit confirmation code on the phone and on the
+  computer. Each address can ask 6 times in 10 minutes, and at most 3 requests wait at a time.
 - The dashboard also accepts only these addresses. You can turn off this limit.
+- Only the computer that runs HealthSync can open the dashboard without a password. Other
+  computers need the dashboard password (`HEALTHSYNC_DASHBOARD_NO_PASSWORD=1` turns this off).
+- Tokens for AI assistants are read-only: they cannot send data or make other tokens.
 - A pairing code has 6 digits. You can use it one time only. It is valid for 10 minutes.
   After 5 incorrect attempts, the code stops working.
 - The server keeps only a hash of each device token.
@@ -351,12 +357,20 @@ The app uses these endpoints. Other clients can use them too.
 | Endpoint | Description |
 |---|---|
 | `GET /health` | Returns `{"ok":true,"name":…,"version":2,"records":2,"os":…,"pair_modes":[…],"mcp":"/mcp","mcp_enabled":true,"urls":{…}}`. When AI assistant access is off, `mcp` is not there and `mcp_enabled` is `false`. `"records": 2` means that `/ingest` keeps the full JSON Lines records and accepts deletions. Refer to [Full records](#full-records). |
-| `POST /pair` | Send `{"device":"…","code":"123456"}`. Returns `{"token":…}`. Without a code, the server returns `428` and `needs_code`, or it waits for approval (macOS dialog or dashboard). |
+| `POST /pair` | Send `{"device":"…","device_id":"…","code":"123456"}`. Returns `{"token","name","version","urls","device":{"id","name"},"repaired"}`. `device_id` is optional: the phone's own stable id. When a device with the same `device_id` pairs again, the server replaces the token of that device and returns `"repaired":true`. Without a code, the server returns `428` and `needs_code`, or it waits for approval (older apps; use `/pair/requests`). |
+| `POST /pair/requests` | Pairing without a code, step 1. Send `{"device":"…","device_id":"…"}`. Returns `202 {"id","confirm":"1234","status":"pending","expires_in":120}`. The computer shows an Allow dialog with the same 4-digit `confirm` code. `429` with `Retry-After` and `"reason":"rate_limited"` when the address sent too many requests (6 in 10 minutes) or 3 requests already wait. |
+| `GET /pair/requests/{id}?wait=25` | Step 2, a long poll: waits up to `wait` seconds (at most 30) for an answer. Returns `200 {"status":"pending","confirm","expires_in"}`, or `200` with the token (same fields as `/pair`, plus `"status":"approved"`) one time, `403 not_approved` when denied, `410 expired`, `404 unknown_request`. |
+| `DELETE /pair/requests/{id}` | The phone cancels its request. The dialog closes. |
+| `GET /auth` | Send the Bearer token. Returns `200 {"ok":true,"scope":"device"\|"mcp","device":{"id","name"},"server":{…}}`, or `401 {"ok":false,"reason":"revoked"\|"unknown"\|"missing"}`. |
+| `POST /backup/chats` | Device token. Send one AI conversation `{"id":"…",…}`, an array, or `{"chats":[…]}`. The server saves each one as is in `chats/<id>.json`. A conversation with the same `id` replaces the earlier one. Returns `{"ok":true,"saved":n,"ids":[…]}`. |
+| `GET /backup/chats`, `GET /backup/chats/{id}` | Device token. The list `{"chats":[{"id","title","updated","bytes"}]}`, or one conversation as it was sent. |
+| `POST /backup/settings` | Device token. Send the app settings as a JSON object, without keys or passwords. The server drops string values whose names look like secrets (`apiKey`, `token`, `password`, …) and returns them in `{"ok":true,"dropped":[…]}`. It saves `settings/device-<id>.json`. |
+| `GET /backup/settings` | Device token. The settings of this device, or, for a device that never sent any, the newest settings of any device: `{"device","device_id","saved","settings":{…}}`. |
 | `POST /ingest` | Send `Authorization: Bearer <token>`. The body is one of: one record on each line as `type\|start\|end\|value\|unit\|source`; a JSON array; `{"records":[…],"deleted":["uuid",…]}`; JSON Lines; CSV or TSV with a header. Returns `{"ok":true,"received":n,"added":{…},"deleted":n}`. |
 | `POST /report` | Send `{"report":{"id","date","institution","items":[{name,key,value,unit,range,flag}]},"folder":…,"files":[{"name","data"(base64)}]}`. |
 | `GET /stats` | Returns the number of records for each type. |
 | `POST /mcp` | MCP (Streamable HTTP, JSON responses). Send a Bearer token. |
-| `POST /mcp/tokens` | Send a Bearer device token and `{"name":"Claude"}`. Returns a new token for an AI agent and configurations to copy: `{"url","token","transport","configs":{"claude_code","json","stdio_bridge","agent_prompt"},"config_list":[{"id","title","text"}]}`. You can revoke the token. Returns `403` when AI assistant access is off. |
+| `POST /mcp/tokens` | Send a Bearer device token and `{"name":"Claude"}`. Returns a new read-only token (scope `mcp`) for an AI agent. That token works only for `/mcp` and `/auth`: other endpoints return `403` with `"reason":"read_only"`. Also returns and configurations to copy: `{"url","token","transport","configs":{"claude_code","json","stdio_bridge","agent_prompt"},"config_list":[{"id","title","text"}]}`. You can revoke the token. Returns `403` when AI assistant access is off. |
 | `GET /skill.md` | Returns the HealthSync skill for AI assistants. |
 | `PATCH /api/devices/{id}` | Dashboard. Send `{"name":"…"}` to rename a device. The token does not change. |
 | `POST /api/mcp` | Dashboard. Send `{"enabled":true}` or `{"enabled":false}` to turn AI assistant access on or off. |

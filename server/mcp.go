@@ -436,10 +436,13 @@ This is private health data: only use it to answer my questions.`, serverName, u
 // handleMCPToken lets a paired device (the iPhone app) mint a separate, revocable token for
 // an AI agent and get ready-to-copy connection configs. POST /mcp/tokens {"name": "..."}
 func (s *Server) handleMCPToken(w http.ResponseWriter, r *http.Request) {
-	device, ok := s.authDevice(r)
+	dev, ok := s.authPhone(w, r, "/mcp/tokens")
 	if !ok {
-		errJSON(w, 401, "bad token")
 		return
+	}
+	device := dev.Name
+	if device == "shared token" {
+		device = ""
 	}
 	if !s.db.MCPEnabled() {
 		errJSON(w, 403, mcpOffMessage)
@@ -460,7 +463,7 @@ func (s *Server) handleMCPToken(w http.ResponseWriter, r *http.Request) {
 		name = string(rr[:80])
 	}
 	tok := newToken()
-	if err := s.db.AddDevice(name, tok, clientIP(r)); err != nil {
+	if _, _, err := s.db.AddDevice(name, tok, clientIP(r), "", scopeMCP); err != nil {
 		errJSON(w, 500, err.Error())
 		return
 	}

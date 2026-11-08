@@ -3,6 +3,29 @@
 Releases happen on their own: bump `version` in mygo.json, add its section here, push to
 main. The desktop app shows the section of a new version in its update window.
 
+## 0.0.5
+
+- Pairing without a code now takes two steps and shows a 4-digit confirmation code on the
+  phone and in the Allow dialog, so you can tell your phone's request from someone else's.
+  The phone can cancel a request, and the dialog then closes. Each address can ask 6 times
+  in 10 minutes.
+- Pairing the same phone again updates its entry instead of adding another one.
+- The phone can check that its token still works, and learns whether it was revoked.
+- The iPhone app can back up its AI conversations and its settings (never keys or
+  passwords) to this computer, in the `chats` and `settings` folders of the data folder.
+- Tokens for AI assistants are read-only: they can read health data through MCP, but
+  cannot send data or make other tokens. Tokens made before 0.0.5 keep working as before;
+  make a new one to get a read-only token.
+- The dashboard needs a password when it is opened from another computer. On the
+  computer running HealthSync it opens without one. The shared token is shown only there.
+- When a new version is out, the bottom left of the window says so. The HealthSync menu in
+  the menu bar has Check for Updates….
+- The app no longer keeps a CPU core busy while it runs.
+- A slow Tailscale no longer slows down replies: its address is looked up in the background.
+- The overview chart counts records by the day they were taken, not the day they arrived.
+- A sync sent in many batches is one row in the sync history, not dozens.
+- A checkup whose files could not be saved in the database fails, so the app sends it again.
+
 ## 0.0.4
 
 - Fix: pairing was refused as "not from the local network" when the iPhone reached the

@@ -28,9 +28,10 @@ func isTailscale(ip net.IP) bool {
 
 var tsCache struct {
 	sync.Mutex
-	at   time.Time
-	ip   string
-	name string
+	at      time.Time
+	ip      string
+	name    string
+	looking bool
 }
 
 // tailscaleCLIs are where the tailscale command lives: on PATH, inside the Mac app, Homebrew.
@@ -38,15 +39,26 @@ var tailscaleCLIs = []string{"tailscale", "/Applications/Tailscale.app/Contents/
 	"/opt/homebrew/bin/tailscale", "/usr/local/bin/tailscale"}
 
 // TailscaleAddr returns this computer's tailnet IPv4 address and MagicDNS name ("" when
-// not on a tailnet), looked up at most once a minute.
+// not on a tailnet). The first call looks it up; after that it answers at once from what
+// was found and looks again in the background once a minute, so a slow or hung tailscale
+// command never holds up a request.
 func TailscaleAddr() (ip, name string) {
 	tsCache.Lock()
-	defer tsCache.Unlock()
-	if time.Since(tsCache.at) < time.Minute {
-		return tsCache.ip, tsCache.name
+	if tsCache.at.IsZero() {
+		tsCache.Unlock()
+		ip, name := lookupTailscale()
+		tsCache.Lock()
+		tsCache.at, tsCache.ip, tsCache.name = time.Now(), ip, name
+	} else if time.Since(tsCache.at) > time.Minute && !tsCache.looking {
+		tsCache.looking = true
+		go func() {
+			ip, name := lookupTailscale()
+			tsCache.Lock()
+			tsCache.at, tsCache.ip, tsCache.name, tsCache.looking = time.Now(), ip, name, false
+			tsCache.Unlock()
+		}()
 	}
-	tsCache.at = time.Now()
-	tsCache.ip, tsCache.name = lookupTailscale()
+	defer tsCache.Unlock()
 	return tsCache.ip, tsCache.name
 }
 

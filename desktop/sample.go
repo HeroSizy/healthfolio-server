@@ -36,7 +36,7 @@ func (s *Sample) Overview() model.Overview {
 	now := time.Now()
 	act := make([]model.DayCount, 30)
 	for i := range act {
-		act[i] = model.DayCount{Day: now.AddDate(0, 0, i-29).Format("2006-01-02"), Added: int(wave(i, 900, 380)), Syncs: 6}
+		act[i] = model.DayCount{Day: now.AddDate(0, 0, i-29).Format("2006-01-02"), Records: int(wave(i, 900, 380)), Added: int(wave(i, 900, 380)), Syncs: 6}
 	}
 	act[11].Added, act[11].Fails = 0, 2
 	last := model.LogEntry{Time: now.Add(-3 * time.Minute).Format(time.RFC3339), Kind: "ingest", Device: "iPhone", OK: true, Received: 412, Added: 388}

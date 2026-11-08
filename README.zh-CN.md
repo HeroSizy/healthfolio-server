@@ -137,6 +137,7 @@ go install github.com/herosizy/healthsync-server@latest
 | `-public-url` | `HEALTHSYNC_PUBLIC_URL` | 局域网 IP 地址 | 二维码里的地址。 |
 | `-admin-password` | `HEALTHSYNC_ADMIN_PASSWORD` | 无 | 控制面板的密码。用户名可以是任意值。 |
 | `-dashboard-lan-only` | `HEALTHSYNC_DASHBOARD_ANYWHERE=1` 关闭它 | 开 | 控制面板只接受局域网和本机的访问。 |
+| `-dashboard-no-password` | `HEALTHSYNC_DASHBOARD_NO_PASSWORD=1` | 关 | 其它电脑不用密码也能打开控制面板。 |
 | `-csv` | `HEALTHSYNC_CSV` | 关 | 另外写入 `<dir>/YYYY-MM-DD.csv`。 |
 | `-hook` | `HEALTHSYNC_HOOK` | 关 | 数据到达后运行的命令。 |
 | `-no-bonjour` | `HEALTHSYNC_NO_BONJOUR=1` | | 不用 Bonjour 广播服务器。 |
@@ -156,7 +157,10 @@ go install github.com/herosizy/healthsync-server@latest
 在你的家庭网络里使用服务器。
 
 - 服务器只接受来自私有地址和本机地址的配对（`POST /pair`）。
+- 不用配对码配对时，手机和电脑上会显示同一个 4 位确认码。同一地址 10 分钟内最多请求 6 次，同时最多 3 个请求在等待。
 - 控制面板也只接受这些地址。你可以关闭这个限制。
+- 只有运行 HealthSync 的这台电脑可以不输密码打开控制面板，其它电脑需要面板密码（`HEALTHSYNC_DASHBOARD_NO_PASSWORD=1` 可关闭这个要求）。
+- 给 AI 助手的令牌是只读的：不能发送数据，也不能再生成令牌。
 - 配对码有 6 位数字。每个配对码只能用一次。配对码 10 分钟内有效。错 5 次后，配对码失效。
 - 服务器只保存每个设备令牌的哈希值。
 
@@ -329,12 +333,20 @@ App 使用下面的接口。其它客户端也可以使用。
 | 接口 | 说明 |
 |---|---|
 | `GET /health` | 返回 `{"ok":true,"name":…,"version":2,"records":2,"os":…,"pair_modes":[…],"mcp":"/mcp","mcp_enabled":true,"urls":{…}}`。AI 助手访问关闭时，没有 `mcp`，`mcp_enabled` 是 `false`。`"records": 2` 表示 `/ingest` 保存完整的 JSON Lines 记录，并接受删除。见 [完整记录](#完整记录)。 |
-| `POST /pair` | 发送 `{"device":"…","code":"123456"}`。返回 `{"token":…}`。没有配对码时，服务器返回 `428` 和 `needs_code`，或者等待批准（macOS 对话框或控制面板）。 |
+| `POST /pair` | 发送 `{"device":"…","device_id":"…","code":"123456"}`。返回 `{"token","name","version","urls","device":{"id","name"},"repaired"}`。`device_id` 可选，是手机自己的固定 id。同一个 `device_id` 再次配对时，服务器替换这台设备的令牌并返回 `"repaired":true`。没有配对码时，服务器返回 `428` 和 `needs_code`，或者等待批准（旧版 App；新版用 `/pair/requests`）。 |
+| `POST /pair/requests` | 不用配对码配对，第 1 步。发送 `{"device":"…","device_id":"…"}`。返回 `202 {"id","confirm":"1234","status":"pending","expires_in":120}`。电脑上弹出「允许」对话框，显示同样的 4 位确认码。同一地址请求太多（10 分钟 6 次）或已有 3 个请求在等待时，返回 `429`、`Retry-After` 和 `"reason":"rate_limited"`。 |
+| `GET /pair/requests/{id}?wait=25` | 第 2 步，长轮询：最多等 `wait` 秒（最多 30）。返回 `200 {"status":"pending","confirm","expires_in"}`；或者一次性返回 `200` 和令牌（字段同 `/pair`，另有 `"status":"approved"`）；被拒绝返回 `403 not_approved`，过期返回 `410 expired`，找不到返回 `404 unknown_request`。 |
+| `DELETE /pair/requests/{id}` | 手机取消请求，电脑上的对话框会关掉。 |
+| `GET /auth` | 发送 Bearer 令牌。返回 `200 {"ok":true,"scope":"device"\|"mcp","device":{"id","name"},"server":{…}}`，或 `401 {"ok":false,"reason":"revoked"\|"unknown"\|"missing"}`。 |
+| `POST /backup/chats` | 设备令牌。发送一个 AI 对话 `{"id":"…",…}`、一个数组，或 `{"chats":[…]}`。服务器把每个对话原样存到 `chats/<id>.json`，同一个 `id` 会覆盖旧的。返回 `{"ok":true,"saved":n,"ids":[…]}`。 |
+| `GET /backup/chats`、`GET /backup/chats/{id}` | 设备令牌。对话列表 `{"chats":[{"id","title","updated","bytes"}]}`，或原样返回一个对话。 |
+| `POST /backup/settings` | 设备令牌。以 JSON 对象发送 App 设置，不要包含密钥或密码。名字像密钥的字符串值（`apiKey`、`token`、`password` 等）会被丢弃，并在 `{"ok":true,"dropped":[…]}` 里列出。保存为 `settings/device-<id>.json`。 |
+| `GET /backup/settings` | 设备令牌。这台设备的设置；从没发过设置的设备会拿到任意设备最新的一份：`{"device","device_id","saved","settings":{…}}`。 |
 | `POST /ingest` | 发送 `Authorization: Bearer <token>`。请求体是下面的一种：每行一条记录 `type\|start\|end\|value\|unit\|source`；JSON 数组；`{"records":[…],"deleted":["uuid",…]}`；JSON Lines；带表头的 CSV 或 TSV。返回 `{"ok":true,"received":n,"added":{…},"deleted":n}`。 |
 | `POST /report` | 发送 `{"report":{"id","date","institution","items":[{name,key,value,unit,range,flag}]},"folder":…,"files":[{"name","data"(base64)}]}`。 |
 | `GET /stats` | 返回每种类型的记录数。 |
 | `POST /mcp` | MCP（Streamable HTTP，JSON 响应）。发送 Bearer 令牌。 |
-| `POST /mcp/tokens` | 发送设备的 Bearer 令牌和 `{"name":"Claude"}`。返回给 AI 助手的新令牌和可以复制的配置：`{"url","token","transport","configs":{"claude_code","json","stdio_bridge","agent_prompt"},"config_list":[{"id","title","text"}]}`。你可以撤销这个令牌。AI 助手访问关闭时返回 `403`。 |
+| `POST /mcp/tokens` | 发送设备的 Bearer 令牌和 `{"name":"Claude"}`。返回给 AI 助手的新只读令牌（scope 为 `mcp`，只能用于 `/mcp` 和 `/auth`，其它接口返回 `403` 和 `"reason":"read_only"`）和可以复制的配置：`{"url","token","transport","configs":{"claude_code","json","stdio_bridge","agent_prompt"},"config_list":[{"id","title","text"}]}`。你可以撤销这个令牌。AI 助手访问关闭时返回 `403`。 |
 | `GET /skill.md` | 返回给 AI 助手的 HealthSync skill。 |
 | `PATCH /api/devices/{id}` | 控制面板用。发送 `{"name":"…"}` 来重命名设备。令牌不变。 |
 | `POST /api/mcp` | 控制面板用。发送 `{"enabled":true}` 或 `{"enabled":false}` 来打开或关闭 AI 助手访问。 |

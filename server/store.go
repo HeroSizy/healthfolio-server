@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -128,7 +129,28 @@ CREATE VIEW IF NOT EXISTS v_workouts AS
 // migrate adds the newer records columns to a database an older version created, then
 // (re)creates the views.
 func migrate(db *sql.DB) error {
-	rows, err := db.Query(`SELECT name FROM pragma_table_info('records')`)
+	if err := addColumns(db, "records", recordColumns); err != nil {
+		return err
+	}
+	if _, err := db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS records_uuid ON records(uuid) WHERE uuid IS NOT NULL`); err != nil {
+		return err
+	}
+	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS records_start ON records(start)`); err != nil {
+		return err
+	}
+	if err := addColumns(db, "devices", [][2]string{{"device_id", "TEXT"}, {"scope", "TEXT NOT NULL DEFAULT 'device'"}}); err != nil {
+		return err
+	}
+	if _, err := db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS devices_device_id ON devices(device_id) WHERE device_id IS NOT NULL`); err != nil {
+		return err
+	}
+	_, err := db.Exec(views)
+	return err
+}
+
+// addColumns adds the columns table is missing.
+func addColumns(db *sql.DB, table string, cols [][2]string) error {
+	rows, err := db.Query(`SELECT name FROM pragma_table_info(?)`, table)
 	if err != nil {
 		return err
 	}
@@ -142,18 +164,14 @@ func migrate(db *sql.DB) error {
 		have[name] = true
 	}
 	rows.Close()
-	for _, c := range recordColumns {
+	for _, c := range cols {
 		if !have[c[0]] {
-			if _, err := db.Exec(`ALTER TABLE records ADD COLUMN ` + c[0] + ` ` + c[1]); err != nil {
+			if _, err := db.Exec(`ALTER TABLE ` + table + ` ADD COLUMN ` + c[0] + ` ` + c[1]); err != nil {
 				return err
 			}
 		}
 	}
-	if _, err := db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS records_uuid ON records(uuid) WHERE uuid IS NOT NULL`); err != nil {
-		return err
-	}
-	_, err = db.Exec(views)
-	return err
+	return nil
 }
 
 func (d *DB) Close() error { return d.sql.Close() }
@@ -347,9 +365,15 @@ func (d *DB) Log(e LogEntry) {
 	if e.Time == "" {
 		e.Time = nowISO()
 	}
-	types, _ := json.Marshal(e.Types)
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	if e.Kind == "ingest" && e.OK && d.mergeIngest(e) {
+		if d.onLog != nil {
+			go d.onLog(e)
+		}
+		return
+	}
+	types, _ := json.Marshal(e.Types)
 	_, _ = d.sql.Exec(`INSERT INTO sync_log (time, kind, device, ip, received, added, bytes, duration_ms, ok, message, types)
 		VALUES (?,?,?,?,?,?,?,?,?,?,?)`, e.Time, e.Kind, e.Device, e.IP, e.Received, e.Added, e.Bytes, e.DurationMS, e.OK, e.Message, string(types))
 	// keep the log bounded
@@ -357,6 +381,53 @@ func (d *DB) Log(e LogEntry) {
 	if d.onLog != nil {
 		go d.onLog(e)
 	}
+}
+
+// syncGap: batches from one device closer together than this are one sync in the history.
+const syncGap = 2 * time.Minute
+
+// mergeIngest adds a successful batch to the previous history row when that row is the
+// same device's sync from moments ago: the app sends a big sync in many batches, which
+// would otherwise fill the history with dozens of rows. Called with d.mu held.
+func (d *DB) mergeIngest(e LogEntry) bool {
+	var (
+		id                            int64
+		t, device, typesJSON, msg     string
+		received, added, bytes, durMS int
+	)
+	var kind string
+	var ok bool
+	err := d.sql.QueryRow(`SELECT id, time, kind, ok, COALESCE(device,''), COALESCE(types,'[]'), COALESCE(message,''),
+			COALESCE(received,0), COALESCE(added,0), COALESCE(bytes,0), COALESCE(duration_ms,0)
+		FROM sync_log ORDER BY id DESC LIMIT 1`).Scan(&id, &t, &kind, &ok, &device, &typesJSON, &msg, &received, &added, &bytes, &durMS)
+	if err != nil || kind != "ingest" || !ok || device != e.Device {
+		return false
+	}
+	last, err := time.Parse(time.RFC3339, t)
+	now, err2 := time.Parse(time.RFC3339, e.Time)
+	if err != nil || err2 != nil || now.Sub(last) > syncGap || now.Before(last) {
+		return false
+	}
+	var types []string
+	_ = json.Unmarshal([]byte(typesJSON), &types)
+	seen := map[string]bool{}
+	for _, x := range types {
+		seen[x] = true
+	}
+	for _, x := range e.Types {
+		if !seen[x] && len(types) < 40 {
+			seen[x] = true
+			types = append(types, x)
+		}
+	}
+	sort.Strings(types)
+	tj, _ := json.Marshal(types)
+	if e.Message != "" {
+		msg = e.Message
+	}
+	_, err = d.sql.Exec(`UPDATE sync_log SET time = ?, received = ?, added = ?, bytes = ?, duration_ms = ?, types = ?, message = ? WHERE id = ?`,
+		e.Time, received+e.Received, added+e.Added, bytes+e.Bytes, durMS+e.DurationMS, string(tj), msg, id)
+	return err == nil
 }
 
 func (d *DB) Logs(limit int, before int64, kind string) ([]LogEntry, error) {
@@ -407,9 +478,30 @@ func (d *DB) Activity(days int) ([]DayCount, error) {
 	for rows.Next() {
 		var c DayCount
 		if err := rows.Scan(&c.Day, &c.Added, &c.Syncs, &c.Fails); err != nil {
+			rows.Close()
 			return nil, err
 		}
 		by[c.Day] = c
+	}
+	rows.Close()
+	// Records counts the samples by the day they were taken, not the day they arrived: the
+	// first sync brings years of history in one day, which made a chart by arrival one
+	// tall bar and nothing else.
+	rec, err := d.sql.Query(`SELECT substr(start,1,10) AS day, COUNT(*) FROM records
+		WHERE start >= ? AND deleted_at IS NULL GROUP BY day`, since)
+	if err != nil {
+		return nil, err
+	}
+	defer rec.Close()
+	for rec.Next() {
+		var day string
+		var n int
+		if err := rec.Scan(&day, &n); err != nil {
+			return nil, err
+		}
+		c := by[day]
+		c.Records = n
+		by[day] = c
 	}
 	out := make([]DayCount, 0, days)
 	for i := days - 1; i >= 0; i-- {
@@ -430,26 +522,64 @@ func hashToken(t string) string {
 	return hex.EncodeToString(h[:])
 }
 
-func (d *DB) AddDevice(name, token, ip string) error {
+const (
+	scopeDevice = "device" // a paired phone: sends data, reads, makes AI tokens
+	scopeMCP    = "mcp"    // an AI assistant: reads through /mcp only
+)
+
+// AddDevice stores a new token. With a deviceID that is already known, it replaces that
+// device's token instead (its old token stops working at once) and repaired is true.
+func (d *DB) AddDevice(name, token, ip, deviceID, scope string) (dev Device, repaired bool, err error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	now := nowISO()
-	_, err := d.sql.Exec(`INSERT INTO devices (name, token_hash, created, last_seen, last_ip) VALUES (?,?,?,?,?)`,
-		name, hashToken(token), now, now, ip)
-	return err
+	if scope == "" {
+		scope = scopeDevice
+	}
+	if deviceID != "" {
+		res, err := d.sql.Exec(`UPDATE devices SET name = ?, token_hash = ?, last_seen = ?, last_ip = ?, revoked = 0, scope = ?
+			WHERE device_id = ?`, name, hashToken(token), now, ip, scope, deviceID)
+		if err != nil {
+			return dev, false, err
+		}
+		if n, _ := res.RowsAffected(); n > 0 {
+			dev, err = d.deviceWhere(`device_id = ?`, deviceID)
+			return dev, true, err
+		}
+	}
+	res, err := d.sql.Exec(`INSERT INTO devices (name, token_hash, created, last_seen, last_ip, device_id, scope) VALUES (?,?,?,?,?,?,?)`,
+		name, hashToken(token), now, now, ip, nullable(deviceID), scope)
+	if err != nil {
+		return dev, false, err
+	}
+	id, _ := res.LastInsertId()
+	dev, err = d.deviceWhere(`id = ?`, id)
+	return dev, false, err
+}
+
+const deviceCols = `id, name, created, COALESCE(last_seen,''), COALESCE(last_ip,''), revoked, scope, COALESCE(device_id,'')`
+
+func scanDevice(sc interface{ Scan(...any) error }) (Device, error) {
+	var dev Device
+	err := sc.Scan(&dev.ID, &dev.Name, &dev.Created, &dev.LastSeen, &dev.LastIP, &dev.Revoked, &dev.Scope, &dev.DeviceID)
+	return dev, err
+}
+
+func (d *DB) deviceWhere(where string, args ...any) (Device, error) {
+	return scanDevice(d.sql.QueryRow(`SELECT `+deviceCols+` FROM devices WHERE `+where, args...))
+}
+
+// LookupToken returns the device that owns token, revoked or not. ok is false when no
+// device has this token.
+func (d *DB) LookupToken(token string) (Device, bool) {
+	dev, err := d.deviceWhere(`token_hash = ?`, hashToken(token))
+	return dev, err == nil
 }
 
 // DeviceForToken returns the device that owns token, if any and not revoked.
 func (d *DB) DeviceForToken(token string) (Device, bool) {
-	var dev Device
-	var seen, ip sql.NullString
-	err := d.sql.QueryRow(`SELECT id, name, created, last_seen, last_ip, revoked FROM devices WHERE token_hash = ?`, hashToken(token)).
-		Scan(&dev.ID, &dev.Name, &dev.Created, &seen, &ip, &dev.Revoked)
-	if err != nil || dev.Revoked {
-		return dev, false
-	}
-	dev.LastSeen, dev.LastIP = seen.String, ip.String
-	return dev, true
+	dev, ok := d.LookupToken(token)
+	return dev, ok && !dev.Revoked
 }
 
 func (d *DB) TouchDevice(id int64, ip string) {
@@ -459,15 +589,15 @@ func (d *DB) TouchDevice(id int64, ip string) {
 }
 
 func (d *DB) Devices() ([]Device, error) {
-	rows, err := d.sql.Query(`SELECT id, name, created, COALESCE(last_seen,''), COALESCE(last_ip,''), revoked FROM devices ORDER BY revoked, id DESC`)
+	rows, err := d.sql.Query(`SELECT ` + deviceCols + ` FROM devices ORDER BY revoked, id DESC`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	out := []Device{}
 	for rows.Next() {
-		var dev Device
-		if err := rows.Scan(&dev.ID, &dev.Name, &dev.Created, &dev.LastSeen, &dev.LastIP, &dev.Revoked); err != nil {
+		dev, err := scanDevice(rows)
+		if err != nil {
 			return nil, err
 		}
 		out = append(out, dev)

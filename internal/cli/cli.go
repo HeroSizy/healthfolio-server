@@ -83,7 +83,7 @@ func serve(cfg *server.Config) error {
 	}
 	log.Printf("dashboard:  %s/", cfg.BaseURL())
 	if cfg.AdminPassword == "" {
-		log.Printf("dashboard has no password (LAN only: %v); set HEALTHSYNC_ADMIN_PASSWORD to add one", cfg.DashboardLAN)
+		log.Printf("dashboard has no password: only this computer can open it; set HEALTHSYNC_ADMIN_PASSWORD to open it from others")
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()

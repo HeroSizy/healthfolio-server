@@ -30,10 +30,13 @@ type LogEntry struct {
 }
 
 type DayCount struct {
-	Day   string `json:"day"`
-	Added int    `json:"added"`
-	Syncs int    `json:"syncs"`
-	Fails int    `json:"fails"`
+	Day string `json:"day"`
+	// Records is how many samples were taken that day (by their own date).
+	Records int `json:"records"`
+	// Added is how many new samples arrived that day.
+	Added int `json:"added"`
+	Syncs int `json:"syncs"`
+	Fails int `json:"fails"`
 }
 
 type Device struct {
@@ -43,6 +46,12 @@ type Device struct {
 	LastSeen string `json:"last_seen"`
 	LastIP   string `json:"last_ip"`
 	Revoked  bool   `json:"revoked"`
+	// Scope is "device" for a paired phone (may send data) and "mcp" for an AI assistant
+	// (read-only).
+	Scope string `json:"scope"`
+	// DeviceID is the phone's own stable id, when it sent one; pairing again with the same
+	// id updates this device instead of adding another.
+	DeviceID string `json:"device_id,omitempty"`
 }
 
 type ReportRow struct {
@@ -122,6 +131,9 @@ type PendingPair struct {
 	Device  string `json:"device"`
 	IP      string `json:"ip"`
 	Created string `json:"created"`
+	// Confirm is the short code the phone shows too; compare them before allowing.
+	Confirm string `json:"confirm,omitempty"`
+	Expires string `json:"expires,omitempty"`
 }
 
 // Settings is what the desktop app lets people change; it's saved as settings.json.

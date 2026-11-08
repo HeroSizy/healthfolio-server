@@ -74,7 +74,32 @@ func (a *App) sidebar(c *ui.Context, pal *palette, bar ui.TitleBar) {
 		a.status(c, pal)
 		ui.Box(c).Height(6)
 		a.navRow(c, pal, settingsNav)
+		a.updateChip(c, pal)
 	})
+}
+
+// updateChip, at the bottom left of the window, says a newer version is out; clicking it
+// opens the update window.
+func (a *App) updateChip(c *ui.Context, pal *palette) {
+	u := a.host.Updates()
+	if u.Available == "" || u.Available == u.Version {
+		return
+	}
+	ui.Box(c).Height(4)
+	r := ui.ButtonBase(c.Key("update-chip")).Padding(7, 10).Radius(9).AlignItems(ui.Center).Gap(8).
+		Label(a.t("有新版本", "Update available")).Background(pal.accent.Alpha(0.12))
+	if r.Hovered() {
+		r.Background(pal.accent.Alpha(0.2))
+	}
+	r.Children(func() {
+		ui.Box(c).Size(7, 7).Radius(4).Background(pal.accent)
+		ui.Text(c, a.t("新版本 "+u.Available+" 可用", "Version "+u.Available+" is available")).
+			FontSize(12).FontWeight(600).TextColor(pal.accent).Grow(1).SingleLine()
+		ui.Text(c, a.t("更新…", "Update…")).FontSize(12).TextColor(pal.accent)
+	})
+	if r.Clicked() {
+		a.host.CheckForUpdates()
+	}
 }
 
 func (a *App) navRow(c *ui.Context, pal *palette, it navItem) {
@@ -127,8 +152,9 @@ func (a *App) status(c *ui.Context, pal *palette) {
 			}
 			d := ui.Box(c).Size(8, 8).Radius(4).Background(dot)
 			if b != nil {
-				// a slow breathing glow while the server listens
-				d.Shadow(0, 0, 6, d.Loop("pulse", 2400_000_000, ui.EaseInOut)*3, dot.Alpha(0.5))
+				// A still glow: a looping animation redraws the window 60 times a second
+				// for as long as the app runs, which kept a CPU core 40% busy.
+				d.Shadow(0, 0, 6, 2, dot.Alpha(0.45))
 			}
 			ui.Text(c, label).FontSize(12).FontWeight(600).TextColor(pal.text)
 		})

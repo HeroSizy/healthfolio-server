@@ -27,6 +27,9 @@ type Config struct {
 	NoBonjour     bool
 	NoDialog      bool
 	DashboardLAN  bool // only serve the dashboard to private / loopback addresses
+	// DashboardNoPassword lets other computers open the dashboard without a password
+	// (HEALTHSYNC_DASHBOARD_NO_PASSWORD=1), for a network you trust completely.
+	DashboardNoPassword bool
 }
 
 // env returns the first non-empty variable among names.
@@ -99,6 +102,7 @@ func BindFlags(fs *flag.FlagSet) *Config {
 	fs.BoolVar(&c.NoDialog, "no-dialog", envBool("HEALTHSYNC_NO_DIALOG"), "macOS: don't show the Allow dialog for pairing without a code")
 	lanOnly := !envBool("HEALTHSYNC_DASHBOARD_ANYWHERE")
 	fs.BoolVar(&c.DashboardLAN, "dashboard-lan-only", lanOnly, "only serve the dashboard to LAN / loopback clients")
+	fs.BoolVar(&c.DashboardNoPassword, "dashboard-no-password", envBool("HEALTHSYNC_DASHBOARD_NO_PASSWORD"), "let other computers open the dashboard without a password")
 	return c
 }
 

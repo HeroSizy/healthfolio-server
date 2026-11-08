@@ -4,7 +4,7 @@
 const ZH = {
   "tab.overview": "概览", "tab.history": "同步记录", "tab.devices": "配对和设备", "tab.reports": "体检报告",
   "ov.records": "健康记录", "ov.last": "最近同步", "ov.devices": "已配对设备", "ov.pairnew": "配对新的 iPhone →",
-  "ov.reports": "体检报告", "ov.activity": "每天新增记录", "ov.30d": "最近 30 天", "ov.types": "数据类型", "ov.filter": "筛选",
+  "ov.reports": "体检报告", "ov.activity": "每天的记录", "ov.30d": "最近 30 天，按数据本身的日期", "ov.types": "数据类型", "ov.filter": "筛选",
   "ov.pick": "选择一个类型", "ov.pickhint": "点左边的数据类型，查看每天的数值。", "ov.server": "服务器",
   "col.type": "类型", "col.count": "条数", "col.latest": "最新", "col.time": "时间", "col.event": "事件", "col.device": "设备",
   "col.received": "收到", "col.new": "新增", "col.detail": "详情", "col.date": "日期",
@@ -21,7 +21,8 @@ const ZH = {
   "rep.hint": "在 App 里导入的体检报告（PDF / 照片 → 结构化数值）。原件保存在数据目录的 reports 文件夹里。",
   "rep.inst": "机构", "rep.items": "项目", "rep.flagged": "异常", "rep.received": "收到时间", "rep.none": "还没有体检报告。",
   "pend.title": "有设备请求配对", "pend.allow": "允许", "pend.deny": "拒绝", "pend.from": "来自",
-  "ev.ingest": "同步数据", "ev.report": "体检报告", "ev.pair": "配对", "ev.auth": "令牌错误", "ev.hook": "钩子",
+  "pend.confirm": "手机上显示的确认码一致时再允许",
+  "ev.ingest": "同步数据", "ev.report": "体检报告", "ev.pair": "配对", "ev.auth": "令牌错误", "ev.hook": "钩子", "ev.backup": "备份",
   "ok": "成功", "fail": "失败", "never": "从未", "none": "还没有记录。", "types": "种类型",
   "srv.address": "手机连接地址", "srv.data": "数据目录", "srv.outputs": "存储", "srv.version": "版本", "srv.started": "启动于",
   "srv.pairing": "配对方式", "srv.password": "控制面板密码", "yes": "已设置", "no": "未设置（仅局域网可访问）",
@@ -39,7 +40,8 @@ const EN_FALLBACK = {
   "dev.revoke": "Revoke", "dev.revoked": "Revoked", "dev.delete": "Delete", "dev.rename": "Rename", "dev.renameAsk": "New name (the token stays; no need to pair again)","dev.none": "No paired devices yet.",
   "dev.confirm": "This device won't be able to sync any more until it pairs again. Revoke?", "tok.hide": "Hide",
   "rep.none": "No checkup reports yet.", "pend.title": "A device wants to pair", "pend.allow": "Allow", "pend.deny": "Deny", "pend.from": "from",
-  "ev.ingest": "Data", "ev.report": "Checkup", "ev.pair": "Pairing", "ev.auth": "Bad token", "ev.hook": "Hook",
+  "pend.confirm": "Allow only if the phone shows the same code",
+  "ev.ingest": "Data", "ev.report": "Checkup", "ev.pair": "Pairing", "ev.auth": "Bad token", "ev.hook": "Hook", "ev.backup": "Backup",
   "ok": "OK", "fail": "Failed", "never": "Never", "none": "Nothing yet.", "types": "types",
   "srv.address": "Address for phones", "srv.data": "Data directory", "srv.outputs": "Storage", "srv.version": "Version", "srv.started": "Started",
   "srv.pairing": "Pairing", "srv.password": "Dashboard password", "yes": "set", "no": "not set (LAN only)",
@@ -147,7 +149,7 @@ async function loadOverview() {
   $("#t-last-hint").textContent = last ? `${devName(last.device || "")} · ${last.ok ? "+" + fmtNum(last.added) : t("fail")}` : "";
   $("#t-devices").textContent = o.devices;
   $("#t-reports").textContent = o.reports;
-  barChart($("#activity"), o.activity, { label: p => p.day, value: p => p.added, fail: p => p.fails > 0 });
+  barChart($("#activity"), o.activity, { label: p => p.day, value: p => p.records, fail: p => p.fails > 0 });
   types = o.stats.types;
   renderTypes();
   const outputs = o.outputs.map(x => `${esc(x.kind)}: <code>${esc(x.where)}</code>`).join("<br>");
@@ -244,7 +246,8 @@ function renderPair(p) {
   pairState = p.active || null;
   const pend = p.pending || [];
   $("#pending").innerHTML = pend.map(x => `<div class="card pending"><div class="row">
-      <div><h2>${t("pend.title")}</h2><p class="muted">${esc(x.device)} · ${t("pend.from")} ${esc(x.ip)}</p></div>
+      <div><h2>${t("pend.title")}</h2><p class="muted">${esc(x.device)} · ${t("pend.from")} ${esc(x.ip)}</p>${x.confirm ? `<p class="muted">${t("pend.confirm")}</p>` : ""}</div>
+      ${x.confirm ? `<div class="confirm-code">${esc(x.confirm)}</div>` : ""}
       <div><button class="ghost" data-answer="${esc(x.id)}" data-allow="0">${t("pend.deny")}</button> <button class="primary" data-answer="${esc(x.id)}" data-allow="1">${t("pend.allow")}</button></div>
     </div></div>`).join("");
   if (pairState) {
@@ -293,7 +296,11 @@ document.addEventListener("click", async e => {
     else if (b.id === "token-show") {
       const code = $("#token");
       if (code.dataset.shown) { code.textContent = "••••••••"; delete code.dataset.shown; b.textContent = t("tok.show"); }
-      else { code.textContent = (await api("/api/token")).token; code.dataset.shown = 1; b.textContent = t("tok.hide"); }
+      else {
+        try { code.textContent = (await api("/api/token")).token; }
+        catch (e) { code.textContent = e.message; }
+        code.dataset.shown = 1; b.textContent = t("tok.hide");
+      }
     }
   } catch (err) { alert(err.message); }
 });

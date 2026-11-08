@@ -150,7 +150,8 @@ func TestFlow(t *testing.T) {
 	for _, l := range logs {
 		kinds[l.Kind]++
 	}
-	if kinds["ingest"] != 2 || kinds["auth"] < 1 || kinds["pair"] < 2 || kinds["report"] != 1 {
+	// the two batches sent moments apart by the same device are one sync in the history
+	if kinds["ingest"] != 1 || kinds["auth"] < 1 || kinds["pair"] < 2 || kinds["report"] != 1 {
 		t.Fatalf("log kinds: %v", kinds)
 	}
 	if code, o := do(t, "GET", ts.URL+"/api/overview", "", ""); code != 200 || o["stats"].(map[string]any)["total"].(float64) != 2 {

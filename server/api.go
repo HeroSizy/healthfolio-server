@@ -61,6 +61,7 @@ func Start(cfg *Config, onEvent func(model.LogEntry)) (*Instance, error) {
 	in := &Instance{Cfg: cfg, srv: srv, db: db, Token: token, stop: func() {}, done: make(chan error, 1),
 		hs: &http.Server{Handler: srv, ReadHeaderTimeout: 10 * time.Second}}
 	logf("healthsync-server %s listening on %s, data in %s", version, addr, cfg.DataDir)
+	go TailscaleAddr() // look it up now rather than in the first request
 	if !cfg.NoBonjour {
 		in.stop = Advertise(cfg.Name, cfg.Port)
 	}
@@ -136,7 +137,7 @@ func (in *Instance) NewMCPToken(name string) (model.MCPConnect, error) {
 		name = "AI assistant"
 	}
 	tok := newToken()
-	if err := in.db.AddDevice(name, tok, "127.0.0.1"); err != nil {
+	if _, _, err := in.db.AddDevice(name, tok, "127.0.0.1", "", scopeMCP); err != nil {
 		return model.MCPConnect{}, err
 	}
 	in.db.Log(LogEntry{Kind: "pair", Device: name, OK: true, Message: "MCP token created in the app"})

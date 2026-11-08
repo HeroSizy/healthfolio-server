@@ -1,18 +1,14 @@
 package server
 
 import (
-	"context"
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/json"
 	"fmt"
-	"github.com/herosizy/healthsync-server/model"
 	"math/big"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -23,7 +19,6 @@ import (
 const (
 	PairTTL      = 10 * time.Minute
 	pairMaxTries = 5
-	dialogWait   = 120 * time.Second
 )
 
 // PairCode is a one-time 6-digit code. It lives in a file so that `healthsync pair`
@@ -38,30 +33,30 @@ type Pairing struct {
 	file string
 	mu   sync.Mutex
 
-	// approvals waiting for someone to click Allow (macOS dialog or the dashboard)
-	pmu     sync.Mutex
-	pending map[string]*PendingPair
-}
-
-type PendingPair struct {
-	ID      string    `json:"id"`
-	Device  string    `json:"device"`
-	IP      string    `json:"ip"`
-	Created time.Time `json:"created"`
-	answer  chan bool
+	// requests to pair without a code, waiting for someone to click Allow (see pair_requests.go)
+	rq requests
 }
 
 func NewPairing(dataDir string) *Pairing {
-	return &Pairing{file: filepath.Join(dataDir, "pair-code.json"), pending: map[string]*PendingPair{}}
+	return &Pairing{file: filepath.Join(dataDir, "pair-code.json"), rq: newRequests()}
 }
 
 func (p *Pairing) New() (PairCode, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	n, _ := rand.Int(rand.Reader, big.NewInt(1_000_000))
-	c := PairCode{Code: fmt.Sprintf("%06d", n.Int64()), Expires: float64(time.Now().Add(PairTTL).Unix())}
+	c := PairCode{Code: randomDigits(6), Expires: float64(time.Now().Add(PairTTL).Unix())}
 	b, _ := json.Marshal(c)
 	return c, os.WriteFile(p.file, b, 0o600)
+}
+
+// randomDigits is n random decimal digits.
+func randomDigits(n int) string {
+	max := big.NewInt(1)
+	for i := 0; i < n; i++ {
+		max.Mul(max, big.NewInt(10))
+	}
+	v, _ := rand.Int(rand.Reader, max)
+	return fmt.Sprintf("%0*d", n, v.Int64())
 }
 
 // Current returns the active code, if any.
@@ -115,9 +110,9 @@ func (p *Pairing) Check(code string) bool {
 	return false
 }
 
-// PairLink is what the QR code encodes; the iPhone app opens it directly.
-// PairLink is what the pairing QR code holds. alt, when not "", is a second address of the
-// server, its Tailscale one, which the app falls back to away from home.
+// PairLink is what the pairing QR code holds; the iPhone app opens it directly. alt, when
+// not "", is a second address of the server, its Tailscale one, which the app falls back
+// to away from home.
 func PairLink(base, alt, code, name string) string {
 	q := url.Values{"url": {base}, "code": {code}, "name": {name}}
 	if alt != "" && alt != base {
@@ -159,90 +154,4 @@ func QRSVG(text string) string {
 	}
 	b.WriteString(`"/></svg>`)
 	return b.String()
-}
-
-// ---------------------------------------------------------------- approval without a code
-
-// DialogSupported: pairing without a code needs somebody to approve it. On macOS we pop up a
-// native dialog; everywhere the dashboard can approve it too.
-func (p *Pairing) Approve(ctx context.Context, device, ip string, macDialog bool) bool {
-	pp := &PendingPair{ID: newToken()[:12], Device: device, IP: ip, Created: time.Now(), answer: make(chan bool, 2)}
-	p.pmu.Lock()
-	p.pending[pp.ID] = pp
-	p.pmu.Unlock()
-	defer func() {
-		p.pmu.Lock()
-		delete(p.pending, pp.ID)
-		p.pmu.Unlock()
-	}()
-	ctx, cancel := context.WithTimeout(ctx, dialogWait)
-	defer cancel()
-	if macDialog && runtime.GOOS == "darwin" {
-		go func() {
-			// Only a real click counts. If the dialog could not be shown (no display, a
-			// headless Mac mini, the screen locked), keep waiting: the request is also in
-			// the desktop app and the dashboard, and can be approved there.
-			if ok, answered := macConfirm(ctx, device); answered {
-				pp.answer <- ok
-			}
-		}()
-	}
-	select {
-	case ok := <-pp.answer:
-		return ok
-	case <-ctx.Done():
-		return false
-	}
-}
-
-func (p *Pairing) Pending() []*PendingPair {
-	p.pmu.Lock()
-	defer p.pmu.Unlock()
-	out := make([]*PendingPair, 0, len(p.pending))
-	for _, pp := range p.pending {
-		out = append(out, pp)
-	}
-	return out
-}
-
-func (p *Pairing) PendingInfo() []model.PendingPair {
-	out := []model.PendingPair{}
-	for _, pp := range p.Pending() {
-		out = append(out, model.PendingPair{ID: pp.ID, Device: pp.Device, IP: pp.IP, Created: pp.Created.Format(time.RFC3339)})
-	}
-	return out
-}
-
-func (p *Pairing) Answer(id string, ok bool) bool {
-	p.pmu.Lock()
-	defer p.pmu.Unlock()
-	pp, found := p.pending[id]
-	if found {
-		select {
-		case pp.answer <- ok:
-		default:
-		}
-	}
-	return found
-}
-
-// macConfirm shows the native dialog. answered is false when nobody clicked: it gave up,
-// was cancelled, or could not be shown at all.
-func macConfirm(ctx context.Context, device string) (allowed, answered bool) {
-	device = strings.NewReplacer(`"`, "'", `\`, "").Replace(device)
-	script := fmt.Sprintf(`display dialog "“%s” wants to sync health data to this computer.\n\n「%s」想把健康数据同步到这台电脑。" `+
-		`with title "HealthSync" buttons {"Deny 拒绝", "Allow 允许"} default button "Allow 允许" with icon note giving up after %d`,
-		device, device, int(dialogWait.Seconds()))
-	out, err := exec.CommandContext(ctx, "/usr/bin/osascript", "-e", script).Output()
-	if err != nil {
-		// Both buttons are normal buttons, so an error means the dialog was not shown
-		// or was cancelled.
-		logf("pairing dialog could not be shown: %v", err)
-		return false, false
-	}
-	s := string(out)
-	if strings.Contains(s, "gave up:true") {
-		return false, false
-	}
-	return strings.Contains(s, "Allow"), true
 }

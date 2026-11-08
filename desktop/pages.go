@@ -40,7 +40,7 @@ func (a *App) overviewPage(c *ui.Context, pal *palette) {
 				a.tile(c, pal, "reports", a.t("体检报告", "Checkups"), itoa(o.Reports), "", 3)
 			})
 			// activity
-			a.section(c, pal, a.t("每天新增记录", "New records per day"), a.t("最近 30 天", "Last 30 days"), nil, func() {
+			a.section(c, pal, a.t("每天的记录", "Records per day"), a.t("最近 30 天，按数据本身的日期", "Last 30 days, by the day they were taken"), nil, func() {
 				a.activityChart(c, pal, o.Activity)
 			})
 			// types + daily chart
@@ -107,7 +107,7 @@ func (a *App) activityChart(c *ui.Context, pal *palette, act []model.DayCount) {
 	vals := make([]float64, len(act))
 	for i, d := range act {
 		labels[i] = d.Day
-		vals[i] = float64(d.Added)
+		vals[i] = float64(d.Records)
 	}
 	a.barChart(c, pal, "activity", labels, vals, func(i int) bool { return act[i].Fails > 0 }, 150, "")
 }
@@ -299,7 +299,7 @@ func (a *App) historyPage(c *ui.Context, pal *palette) {
 }
 
 func (a *App) eventBadge(c *ui.Context, pal *palette, e model.LogEntry) {
-	names := map[string][2]string{"ingest": {"同步数据", "Data"}, "report": {"体检报告", "Checkup"}, "pair": {"配对", "Pairing"}, "auth": {"令牌错误", "Bad token"}, "hook": {"钩子", "Hook"}}
+	names := map[string][2]string{"ingest": {"同步数据", "Data"}, "report": {"体检报告", "Checkup"}, "pair": {"配对", "Pairing"}, "auth": {"令牌错误", "Bad token"}, "hook": {"钩子", "Hook"}, "backup": {"备份", "Backup"}}
 	n := names[e.Kind]
 	fg, bg := pal.ok, pal.okSoft
 	if !e.OK {
@@ -398,7 +398,13 @@ func (a *App) pendingCard(c *ui.Context, pal *palette, b Backend, p model.Pendin
 		ui.Column(c).Grow(1).Gap(2).Children(func() {
 			ui.Text(c, a.t("有设备请求配对", "A device wants to pair")).FontSize(14).FontWeight(650)
 			ui.Text(c, p.Device+" · "+p.IP).FontSize(12).TextColor(pal.textMuted)
+			if p.Confirm != "" {
+				ui.Text(c, a.t("手机上显示的确认码一致时再允许", "Allow only if the phone shows the same code")).FontSize(12).TextColor(pal.textMuted)
+			}
 		})
+		if p.Confirm != "" {
+			ui.Text(c, p.Confirm).FontSize(26).FontWeight(700).LetterSpacing(4)
+		}
 		if ui.Button(c, a.t("拒绝", "Deny")).Clicked() && b != nil {
 			b.AnswerPending(p.ID, false)
 			a.Refresh()
