@@ -32,7 +32,6 @@ CREATE TABLE IF NOT EXISTS records (
     value TEXT NOT NULL, num REAL, unit TEXT, source TEXT NOT NULL DEFAULT '',
     received TEXT NOT NULL,
     UNIQUE (type, start, "end", source, value));
-CREATE INDEX IF NOT EXISTS records_type_start ON records(type, start);
 CREATE TABLE IF NOT EXISTS checkup (
     report_id TEXT NOT NULL, date TEXT NOT NULL, institution TEXT, name TEXT NOT NULL,
     key TEXT, value TEXT, num REAL, unit TEXT, range TEXT, flag TEXT,
@@ -78,7 +77,9 @@ func (d *DB) SetMCPEnabled(on bool) error {
 
 func OpenDB(path string) (*DB, error) {
 	// WAL + busy timeout so other tools (sqlite3, Datasette, scripts) can read while we write.
-	db, err := sql.Open("sqlite", "file:"+path+"?_pragma=journal_mode(WAL)&_pragma=busy_timeout(30000)&_pragma=synchronous(NORMAL)")
+	// journal_size_limit: after a checkpoint the WAL file shrinks back to 16 MB instead of
+	// staying as big as the largest sync ever made it.
+	db, err := sql.Open("sqlite", "file:"+path+"?_pragma=journal_mode(WAL)&_pragma=busy_timeout(30000)&_pragma=synchronous(NORMAL)&_pragma=journal_size_limit(16777216)")
 	if err != nil {
 		return nil, err
 	}
@@ -91,7 +92,33 @@ func OpenDB(path string) (*DB, error) {
 		db.Close()
 		return nil, fmt.Errorf("migrate %s: %w", path, err)
 	}
-	return &DB{sql: db, path: path}, nil
+	d := &DB{sql: db, path: path}
+	go d.compact()
+	return d, nil
+}
+
+// compact gives back the room of deleted rows and dropped indexes when there is a lot of
+// it, and trims the WAL. It runs in the background once after opening: VACUUM rewrites the
+// whole file, and syncs meanwhile wait for it (busy_timeout).
+func (d *DB) compact() {
+	_, _ = d.sql.Exec(`PRAGMA wal_checkpoint(TRUNCATE)`)
+	var free, size int64
+	if d.sql.QueryRow(`PRAGMA freelist_count`).Scan(&free) != nil || d.sql.QueryRow(`PRAGMA page_size`).Scan(&size) != nil {
+		return
+	}
+	if free*size < 32<<20 {
+		return
+	}
+	start := time.Now()
+	d.mu.Lock()
+	_, err := d.sql.Exec(`VACUUM`)
+	d.mu.Unlock()
+	if err != nil {
+		logf("compacting the database: %v", err)
+		return
+	}
+	_, _ = d.sql.Exec(`PRAGMA wal_checkpoint(TRUNCATE)`)
+	logf("compacted the database: gave back %d MB in %s", free*size>>20, time.Since(start).Round(time.Millisecond))
 }
 
 // recordColumns are the columns added to the base records table for the app's full
@@ -136,6 +163,11 @@ func migrate(db *sql.DB) error {
 		return err
 	}
 	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS records_start ON records(start)`); err != nil {
+		return err
+	}
+	// records_type_start repeated the start of the UNIQUE (type, start, …) index, which
+	// answers the same queries: it took about a sixth of the file for nothing.
+	if _, err := db.Exec(`DROP INDEX IF EXISTS records_type_start`); err != nil {
 		return err
 	}
 	if err := addColumns(db, "devices", [][2]string{{"device_id", "TEXT"}, {"scope", "TEXT NOT NULL DEFAULT 'device'"}}); err != nil {

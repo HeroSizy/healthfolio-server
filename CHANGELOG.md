@@ -3,6 +3,12 @@
 Releases happen on their own: bump `version` in mygo.json, add its section here, push to
 main. The desktop app shows the section of a new version in its update window.
 
+## 0.0.9
+
+- The health database is about a quarter smaller: an index that repeated another one is
+  gone, the database is compacted once in the background after the update (a few
+  seconds), and its write-ahead log no longer stays as big as the largest sync made it.
+
 ## 0.0.8
 
 - The overview of the app and of the dashboard shows how much room the data takes: in all
