@@ -90,6 +90,8 @@ type App struct {
 	formDirty bool
 	saveErr   string
 
+	ob onboarding
+
 	toast   string
 	loading sync.Mutex
 }
@@ -150,7 +152,8 @@ func (a *App) load() {
 		a.ov, a.logs, a.devices, a.reports, a.pending, a.daily = ov, logs, devs, reps, pend, daily
 		a.moreLogs = len(logs) == 200
 		a.setPair(pair)
-		if a.selType == "" && len(ov.Stats.Types) > 0 {
+		a.decideOnboarding()
+		if a.selType == ""&& len(ov.Stats.Types) > 0 {
 			a.selType = ov.Stats.Types[0].Type
 			go a.loadDaily()
 		}
@@ -196,6 +199,10 @@ func (a *App) View(c *ui.Context) {
 	bar := c.TitleBar()
 	row := ui.Row(c).Fill().AlignItems(ui.Stretch)
 	backdrop(c, row, pal)
+	if a.ob.show {
+		row.Children(func() { a.onboardingView(c, pal) })
+		return
+	}
 	row.Children(func() {
 		a.sidebar(c, pal, bar)
 		ui.Column(c).Grow(1).MinWidth(0).Padding(10, 10, 10, 0).DragWindow().Children(func() {

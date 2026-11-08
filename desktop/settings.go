@@ -163,6 +163,7 @@ func (a *App) updatesGroup(c *ui.Context, pal *palette) {
 
 func (a *App) save() {
 	s := a.form
+	s.Onboarded = s.Onboarded || a.host.Settings().Onboarded
 	go func() {
 		err := a.host.SaveSettings(s)
 		a.host.Update(func() {

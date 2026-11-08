@@ -152,6 +152,8 @@ type Settings struct {
 	Notify        bool   `json:"notify,omitempty"` // desktop notification after each sync
 	// NoCrashReports stops sending crash reports (errors and stack traces, never health data).
 	NoCrashReports bool `json:"no_crash_reports,omitempty"`
+	// Onboarded is set once the first-launch steps were finished or skipped.
+	Onboarded bool `json:"onboarded,omitempty"`
 }
 
 // Updates is the state of the desktop app's self-updates, for the settings page.

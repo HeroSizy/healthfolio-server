@@ -3,6 +3,12 @@
 Releases happen on their own: bump `version` in mygo.json, add its section here, push to
 main. The desktop app shows the section of a new version in its update window.
 
+## 0.0.6
+
+- The first launch walks you through setting up: what HealthSync does, the computer's
+  name and data folder, pairing your iPhone with a QR code, and where things are. It shows
+  only on a computer with no paired device and no data, and you can skip it.
+
 ## 0.0.5
 
 - Pairing without a code now takes two steps and shows a 4-digit confirmation code on the

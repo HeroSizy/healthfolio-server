@@ -29,6 +29,10 @@ func main() {
 	app := desktop.New(s, !strings.Contains(frag, "en"))
 	mygo.App.WhenReady(func() {
 		win = mygo.NewWindow(mygo.WindowOptions{Title: "HealthSync", Width: 1080, Height: 720, Content: ui.View(app.View)})
+		if strings.Contains(frag, "welcome") {
+			app.ShowOnboarding()
+			return
+		}
 		for _, p := range []string{"history", "pair", "mcp", "reports", "settings"} {
 			if strings.Contains(frag, p) {
 				app.ShowPage(p)
