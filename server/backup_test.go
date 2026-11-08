@@ -44,8 +44,29 @@ func TestBackupChatsAndSettings(t *testing.T) {
 		t.Fatalf("get: %d %v", code, r)
 	}
 
+	// deleting: one, then a batch with one already gone; the AI token may not
+	if code, _ := do(t, "DELETE", url+"/backup/chats/c1", ai, ""); code != 403 {
+		t.Fatalf("AI token deleted: %d", code)
+	}
+	if code, r := do(t, "DELETE", url+"/backup/chats/c1", "master", ""); code != 200 || r["deleted"] != true {
+		t.Fatalf("delete: %d %v", code, r)
+	}
+	if code, r := do(t, "DELETE", url+"/backup/chats/c1", "master", ""); code != 200 || r["deleted"] != false {
+		t.Fatalf("delete again: %d %v", code, r)
+	}
+	code, r := do(t, "POST", url+"/backup/chats/delete", "master", `{"ids":["../evil","c1"]}`)
+	if code != 200 || len(anyStrings(r["deleted"])) != 1 || anyStrings(r["missing"])[0] != "c1" {
+		t.Fatalf("batch delete: %d %v", code, r)
+	}
+	if entries, _ := os.ReadDir(filepath.Join(s.cfg.DataDir, "chats")); len(entries) != 0 {
+		t.Fatalf("left %d chat files", len(entries))
+	}
+	if code, _ := do(t, "POST", url+"/backup/chats/delete", "master", `{}`); code != 400 {
+		t.Fatalf("no ids: %d", code)
+	}
+
 	// settings: secret-looking strings are dropped
-	code, r := do(t, "POST", url+"/backup/settings", "master", `{"theme":"dark","maxTokens":4000,"provider":{"name":"x","apiKey":"sk-1"}}`)
+	code, r = do(t, "POST", url+"/backup/settings", "master", `{"theme":"dark","maxTokens":4000,"provider":{"name":"x","apiKey":"sk-1"}}`)
 	if code != 200 || len(anyStrings(r["dropped"])) != 1 || anyStrings(r["dropped"])[0] != "provider.apiKey" {
 		t.Fatalf("settings: %d %v", code, r)
 	}

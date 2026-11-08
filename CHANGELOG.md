@@ -3,6 +3,12 @@
 Releases happen on their own: bump `version` in mygo.json, add its section here, push to
 main. The desktop app shows the section of a new version in its update window.
 
+## 0.0.7
+
+- Deleting a conversation in the iPhone app also deletes its backup on this computer
+  (`DELETE /backup/chats/{id}`, `POST /backup/chats/delete`; `/health` lists
+  `chats_delete`).
+
 ## 0.0.6
 
 - The first launch walks you through setting up: what HealthSync does, the computer's

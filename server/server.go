@@ -100,6 +100,8 @@ func (s *Server) routes() {
 	m.HandleFunc("POST /backup/chats", s.handleBackupChats)
 	m.HandleFunc("GET /backup/chats", s.handleListChats)
 	m.HandleFunc("GET /backup/chats/{id}", s.handleGetChat)
+	m.HandleFunc("DELETE /backup/chats/{id}", s.handleDeleteChat)
+	m.HandleFunc("POST /backup/chats/delete", s.handleDeleteChats)
 	m.HandleFunc("POST /backup/settings", s.handleBackupSettings)
 	m.HandleFunc("GET /backup/settings", s.handleGetSettings)
 	m.HandleFunc("POST /mcp", s.handleMCP)
@@ -321,7 +323,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		"records": recordsVersion, "urls": s.urls(r), "mcp_enabled": s.db.MCPEnabled(),
 		// what this server can do beyond protocol 2: two-step pairing with a confirmation
 		// code, GET /auth, pairing again by device_id, and backups of AI chats and settings
-		"features": []string{"pair_requests", "auth", "device_id", "chats", "settings"},
+		"features": []string{"pair_requests", "auth", "device_id", "chats", "chats_delete", "settings"},
 	}
 	if s.db.MCPEnabled() {
 		out["mcp"] = "/mcp"

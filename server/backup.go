@@ -206,6 +206,78 @@ func (s *Server) handleGetChat(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(b)
 }
 
+// removeChats deletes the backups of ids and returns those that were there.
+func (s *Server) removeChats(ids []string) (deleted, missing []string, err error) {
+	deleted, missing = []string{}, []string{}
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		switch e := os.Remove(filepath.Join(s.chatsDir(), chatFile(id))); {
+		case e == nil:
+			deleted = append(deleted, id)
+		case os.IsNotExist(e):
+			missing = append(missing, id)
+		default:
+			return deleted, missing, e
+		}
+	}
+	return deleted, missing, nil
+}
+
+// DELETE /backup/chats/{id}: 200 either way, so deleting twice is fine; "deleted" says
+// whether there was a backup.
+func (s *Server) handleDeleteChat(w http.ResponseWriter, r *http.Request) {
+	dev, ok := s.authPhone(w, r, "/backup/chats")
+	if !ok {
+		return
+	}
+	deleted, _, err := s.removeChats([]string{r.PathValue("id")})
+	if err != nil {
+		errJSON(w, 500, err.Error())
+		return
+	}
+	if len(deleted) > 0 {
+		s.db.Log(LogEntry{Kind: "backup", Device: dev.Name, IP: clientIP(r), OK: true, Message: "deleted 1 AI chat"})
+	}
+	writeJSON(w, 200, map[string]any{"ok": true, "deleted": len(deleted) > 0})
+}
+
+// POST /backup/chats/delete {"ids": [...]}
+func (s *Server) handleDeleteChats(w http.ResponseWriter, r *http.Request) {
+	dev, ok := s.authPhone(w, r, "/backup/chats")
+	if !ok {
+		return
+	}
+	body, ok := readBody(w, r, maxSettingsBody)
+	if !ok {
+		return
+	}
+	var req struct {
+		IDs []any `json:"ids"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil || req.IDs == nil {
+		errJSON(w, 400, `send {"ids": [...]}`)
+		return
+	}
+	ids := make([]string, 0, len(req.IDs))
+	for _, v := range req.IDs {
+		if v != nil {
+			ids = append(ids, fmt.Sprint(v))
+		}
+	}
+	deleted, missing, err := s.removeChats(ids)
+	if err != nil {
+		errJSON(w, 500, err.Error())
+		return
+	}
+	if len(deleted) > 0 {
+		s.db.Log(LogEntry{Kind: "backup", Device: dev.Name, IP: clientIP(r), OK: true, Message: fmt.Sprintf("deleted %d AI chat(s)", len(deleted))})
+	}
+	writeJSON(w, 200, map[string]any{"ok": true, "deleted": deleted, "missing": missing})
+}
+
 // secretKey matches setting names that hold a secret. The app is not supposed to send
 // any; if one slips through it is dropped rather than written to disk.
 var secretKey = regexp.MustCompile(`(?i)(api[_-]?key|apikey|secret|password|passwd|token|credential|private[_-]?key|authorization|bearer)`)

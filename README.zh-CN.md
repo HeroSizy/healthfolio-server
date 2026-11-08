@@ -340,6 +340,8 @@ App 使用下面的接口。其它客户端也可以使用。
 | `GET /auth` | 发送 Bearer 令牌。返回 `200 {"ok":true,"scope":"device"\|"mcp","device":{"id","name"},"server":{…}}`，或 `401 {"ok":false,"reason":"revoked"\|"unknown"\|"missing"}`。 |
 | `POST /backup/chats` | 设备令牌。发送一个 AI 对话 `{"id":"…",…}`、一个数组，或 `{"chats":[…]}`。服务器把每个对话原样存到 `chats/<id>.json`，同一个 `id` 会覆盖旧的。返回 `{"ok":true,"saved":n,"ids":[…]}`。 |
 | `GET /backup/chats`、`GET /backup/chats/{id}` | 设备令牌。对话列表 `{"chats":[{"id","title","updated","bytes"}]}`，或原样返回一个对话。 |
+| `DELETE /backup/chats/{id}` | 设备令牌。删除一个对话的备份。返回 `200 {"ok":true,"deleted":true}`，本来就没有时 `"deleted":false`。 |
+| `POST /backup/chats/delete` | 设备令牌。发送 `{"ids":[…]}`。返回 `{"ok":true,"deleted":[…],"missing":[…]}`。 |
 | `POST /backup/settings` | 设备令牌。以 JSON 对象发送 App 设置，不要包含密钥或密码。名字像密钥的字符串值（`apiKey`、`token`、`password` 等）会被丢弃，并在 `{"ok":true,"dropped":[…]}` 里列出。保存为 `settings/device-<id>.json`。 |
 | `GET /backup/settings` | 设备令牌。这台设备的设置；从没发过设置的设备会拿到任意设备最新的一份：`{"device","device_id","saved","settings":{…}}`。 |
 | `POST /ingest` | 发送 `Authorization: Bearer <token>`。请求体是下面的一种：每行一条记录 `type\|start\|end\|value\|unit\|source`；JSON 数组；`{"records":[…],"deleted":["uuid",…]}`；JSON Lines；带表头的 CSV 或 TSV。返回 `{"ok":true,"received":n,"added":{…},"deleted":n}`。 |

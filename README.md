@@ -364,6 +364,8 @@ The app uses these endpoints. Other clients can use them too.
 | `GET /auth` | Send the Bearer token. Returns `200 {"ok":true,"scope":"device"\|"mcp","device":{"id","name"},"server":{…}}`, or `401 {"ok":false,"reason":"revoked"\|"unknown"\|"missing"}`. |
 | `POST /backup/chats` | Device token. Send one AI conversation `{"id":"…",…}`, an array, or `{"chats":[…]}`. The server saves each one as is in `chats/<id>.json`. A conversation with the same `id` replaces the earlier one. Returns `{"ok":true,"saved":n,"ids":[…]}`. |
 | `GET /backup/chats`, `GET /backup/chats/{id}` | Device token. The list `{"chats":[{"id","title","updated","bytes"}]}`, or one conversation as it was sent. |
+| `DELETE /backup/chats/{id}` | Device token. Deletes the backup of one conversation. Returns `200 {"ok":true,"deleted":true}`, or `"deleted":false` when there was none. |
+| `POST /backup/chats/delete` | Device token. Send `{"ids":[…]}`. Returns `{"ok":true,"deleted":[…],"missing":[…]}`. |
 | `POST /backup/settings` | Device token. Send the app settings as a JSON object, without keys or passwords. The server drops string values whose names look like secrets (`apiKey`, `token`, `password`, …) and returns them in `{"ok":true,"dropped":[…]}`. It saves `settings/device-<id>.json`. |
 | `GET /backup/settings` | Device token. The settings of this device, or, for a device that never sent any, the newest settings of any device: `{"device","device_id","saved","settings":{…}}`. |
 | `POST /ingest` | Send `Authorization: Bearer <token>`. The body is one of: one record on each line as `type\|start\|end\|value\|unit\|source`; a JSON array; `{"records":[…],"deleted":["uuid",…]}`; JSON Lines; CSV or TSV with a header. Returns `{"ok":true,"received":n,"added":{…},"deleted":n}`. |
