@@ -3,6 +3,15 @@
 Releases happen on their own: bump `version` in mygo.json, add its section here, push to
 main. The desktop app shows the section of a new version in its update window.
 
+## 0.0.3
+
+- Pairing without a code no longer fails at once when the Allow dialog cannot be shown (a
+  Mac mini without a screen, or a locked screen). The request waits, and you can allow it
+  in the app window or the dashboard, or pair with the 6-digit code.
+- Pairing errors carry a reason code, so the iPhone app shows a clear message in your
+  language. A refused pairing is now in the history, with the address it came from.
+- A checkup report that is sent again replaces its items instead of leaving old rows.
+
 ## 0.0.2
 
 - Turn AI assistant access (MCP) on or off in the app or the dashboard. The change applies

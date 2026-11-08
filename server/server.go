@@ -139,6 +139,16 @@ func errJSON(w http.ResponseWriter, code int, msg string) {
 	writeJSON(w, code, map[string]any{"error": msg})
 }
 
+// pairErr answers a failed /pair with a stable reason code. The app shows its own,
+// translated text for the code; "error" stays for older apps and for people using curl.
+func pairErr(w http.ResponseWriter, status int, reason, msg string, extra map[string]any) {
+	body := map[string]any{"error": msg, "reason": reason}
+	for k, v := range extra {
+		body[k] = v
+	}
+	writeJSON(w, status, body)
+}
+
 func clientIP(r *http.Request) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
@@ -410,7 +420,10 @@ func (s *Server) handleReport(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handlePair(w http.ResponseWriter, r *http.Request) {
 	ip := clientIP(r)
 	if !isLAN(net.ParseIP(ip)) {
-		errJSON(w, 403, "pairing is only allowed from the local network")
+		// Log it with the address, so "why was I refused" can be answered from the history.
+		s.db.Log(LogEntry{Kind: "pair", IP: ip, Message: "refused: not from the local network or Tailscale"})
+		logf("pair refused: %s is not a local network or Tailscale address", ip)
+		pairErr(w, 403, "not_local", "pairing is only allowed from the local network", map[string]any{"ip": ip})
 		return
 	}
 	var req struct {
@@ -441,12 +454,12 @@ func (s *Server) handlePair(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.db.Log(LogEntry{Kind: "pair", Device: device, IP: ip, Message: "wrong or expired code"})
-		errJSON(w, 403, "配对码不对或已过期 / wrong or expired code")
+		pairErr(w, 403, "wrong_code", "配对码不对或已过期 / wrong or expired code", nil)
 		return
 	}
 	modes := s.dialogModes()
 	if modes[0] != "dialog" {
-		writeJSON(w, 428, map[string]any{"error": "需要配对码 / pairing code required", "needs_code": true})
+		writeJSON(w, 428, map[string]any{"error": "需要配对码 / pairing code required", "reason": "needs_code", "needs_code": true})
 		return
 	}
 	logf("pair request from %s (%s), waiting for approval", device, ip)
@@ -455,7 +468,7 @@ func (s *Server) handlePair(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.db.Log(LogEntry{Kind: "pair", Device: device, IP: ip, Message: "denied or timed out"})
-	errJSON(w, 403, "电脑上没有点「允许」 / not approved")
+	pairErr(w, 403, "not_approved", "电脑上没有点「允许」 / not approved", nil)
 }
 
 // ---------------------------------------------------------------- dashboard API

@@ -178,7 +178,14 @@ func (p *Pairing) Approve(ctx context.Context, device, ip string, macDialog bool
 	ctx, cancel := context.WithTimeout(ctx, dialogWait)
 	defer cancel()
 	if macDialog && runtime.GOOS == "darwin" {
-		go func() { pp.answer <- macConfirm(ctx, device) }()
+		go func() {
+			// Only a real click counts. If the dialog could not be shown (no display, a
+			// headless Mac mini, the screen locked), keep waiting: the request is also in
+			// the desktop app and the dashboard, and can be approved there.
+			if ok, answered := macConfirm(ctx, device); answered {
+				pp.answer <- ok
+			}
+		}()
 	}
 	select {
 	case ok := <-pp.answer:
@@ -219,15 +226,23 @@ func (p *Pairing) Answer(id string, ok bool) bool {
 	return found
 }
 
-func macConfirm(ctx context.Context, device string) bool {
+// macConfirm shows the native dialog. answered is false when nobody clicked: it gave up,
+// was cancelled, or could not be shown at all.
+func macConfirm(ctx context.Context, device string) (allowed, answered bool) {
 	device = strings.NewReplacer(`"`, "'", `\`, "").Replace(device)
 	script := fmt.Sprintf(`display dialog "“%s” wants to sync health data to this computer.\n\n「%s」想把健康数据同步到这台电脑。" `+
 		`with title "HealthSync" buttons {"Deny 拒绝", "Allow 允许"} default button "Allow 允许" with icon note giving up after %d`,
 		device, device, int(dialogWait.Seconds()))
 	out, err := exec.CommandContext(ctx, "/usr/bin/osascript", "-e", script).Output()
 	if err != nil {
-		return false
+		// Both buttons are normal buttons, so an error means the dialog was not shown
+		// or was cancelled.
+		logf("pairing dialog could not be shown: %v", err)
+		return false, false
 	}
 	s := string(out)
-	return strings.Contains(s, "Allow") && !strings.Contains(s, "gave up:true")
+	if strings.Contains(s, "gave up:true") {
+		return false, false
+	}
+	return strings.Contains(s, "Allow"), true
 }

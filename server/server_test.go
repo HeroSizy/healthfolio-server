@@ -87,7 +87,7 @@ func TestFlow(t *testing.T) {
 	}
 
 	// pairing with a code issues a per-device token
-	if code, r := do(t, "POST", ts.URL+"/pair", "", `{"device":"iPhone"}`); code != 428 || r["needs_code"] != true {
+	if code, r := do(t, "POST", ts.URL+"/pair", "", `{"device":"iPhone"}`); code != 428 || r["needs_code"] != true || r["reason"] != "needs_code" {
 		t.Fatalf("pair without code: %d %v", code, r)
 	}
 	if code, _ := do(t, "POST", ts.URL+"/api/pair", "", ""); code != 403 {
@@ -98,8 +98,8 @@ func TestFlow(t *testing.T) {
 	if code != 200 || !strings.HasPrefix(active["link"].(string), "healthsync://pair?") || !strings.Contains(active["qr"].(string), "<svg") {
 		t.Fatalf("new pair code: %d %v", code, p)
 	}
-	if code, _ := do(t, "POST", ts.URL+"/pair", "", `{"device":"iPhone","code":"000000x"}`); code != 403 {
-		t.Fatalf("wrong code accepted")
+	if code, r := do(t, "POST", ts.URL+"/pair", "", `{"device":"iPhone","code":"000000x"}`); code != 403 || r["reason"] != "wrong_code" {
+		t.Fatalf("wrong code accepted: %d %v", code, r)
 	}
 	code, pr := do(t, "POST", ts.URL+"/pair", "", `{"device":"My iPhone","code":"`+active["code"].(string)+`"}`)
 	if code != 200 || pr["token"] == nil {
@@ -169,3 +169,20 @@ func filepathGlob(dir, rel string) ([]string, error) {
 type globErr struct{ p string }
 
 func (e *globErr) Error() string { return "missing " + e.p }
+
+func TestPairRefusedOutsideLANHasReason(t *testing.T) {
+	db, err := OpenDB(filepath.Join(t.TempDir(), "health.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{db: db}
+	req := httptest.NewRequest("POST", "/pair", strings.NewReader(`{"device":"iPhone"}`))
+	req.RemoteAddr = "203.0.113.9:4000"
+	w := httptest.NewRecorder()
+	s.handlePair(w, req)
+	var r map[string]any
+	_ = json.Unmarshal(w.Body.Bytes(), &r)
+	if w.Code != 403 || r["reason"] != "not_local" || r["ip"] != "203.0.113.9" {
+		t.Fatalf("got %d %v", w.Code, r)
+	}
+}
