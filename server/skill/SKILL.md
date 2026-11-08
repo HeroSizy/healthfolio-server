@@ -26,6 +26,10 @@ checkup reports. The data comes from the user's iPhone and stays on their own co
 | A trend over days or weeks | `daily_summary` (type, from, to) |
 | Single samples, for example heart rate during a run | `get_records` (type, from, to, limit) |
 | Checkup results | `get_checkups` (name, from) |
+| Which checkup reports exist, and their original files | `list_checkup_reports` |
+| Read an original report (PDF or photo) | `get_report_file` (report_id, name) |
+| Conversations with the iPhone app's AI | `list_ai_chats`, then `get_ai_chat` (id) |
+| The iPhone app's settings | `get_app_settings` |
 | Anything else | `query_sql` (one SELECT) |
 
 Type names can be short: `StepCount`, `RestingHeartRate`, `HeartRateVariabilitySDNN`,

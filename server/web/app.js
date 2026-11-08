@@ -23,6 +23,10 @@ const ZH = {
   "pend.title": "有设备请求配对", "pend.allow": "允许", "pend.deny": "拒绝", "pend.from": "来自",
   "pend.confirm": "手机上显示的确认码一致时再允许",
   "ev.ingest": "同步数据", "ev.report": "体检报告", "ev.pair": "配对", "ev.auth": "令牌错误", "ev.hook": "钩子", "ev.backup": "备份",
+  "rd.item": "项目", "rd.value": "结果", "rd.range": "参考范围", "rd.pick": "点左边的项目，在原件里找到它。",
+  "rd.files": "{n} 个原件", "rd.nofiles": "服务器上没有这份报告的原件（App 备份时要勾选「原始报告文件」）。",
+  "rd.noloc": "这个项目没有位置信息（较早导入的报告没有）。", "rd.missing": "原件 {name} 不在服务器上。",
+  "rd.page": "第 {n} 页", "rd.cantshow": "浏览器显示不了这个文件：", "rd.locate": "在原件里定位",
   "st.title": "存储空间", "st.total": "共 {n}", "st.disk": "磁盘剩余 {free} / {size}", "st.files": "{n} 个文件",
   "st.database": "健康数据库", "st.reports": "体检报告", "st.chats": "AI 对话备份", "st.settings": "App 设置备份", "st.csv": "CSV 文件", "st.other": "其它",
   "ok": "成功", "fail": "失败", "never": "从未", "none": "还没有记录。", "types": "种类型",
@@ -44,6 +48,10 @@ const EN_FALLBACK = {
   "rep.none": "No checkup reports yet.", "pend.title": "A device wants to pair", "pend.allow": "Allow", "pend.deny": "Deny", "pend.from": "from",
   "pend.confirm": "Allow only if the phone shows the same code",
   "ev.ingest": "Data", "ev.report": "Checkup", "ev.pair": "Pairing", "ev.auth": "Bad token", "ev.hook": "Hook", "ev.backup": "Backup",
+  "rd.item": "Item", "rd.value": "Result", "rd.range": "Range", "rd.pick": "Click an item to find it in the original.",
+  "rd.files": "{n} original(s)", "rd.nofiles": "No original of this report on the server (in the app's backup, turn on Original report files).",
+  "rd.noloc": "This item has no location (reports imported earlier don't).", "rd.missing": "The original {name} is not on the server.",
+  "rd.page": "page {n}", "rd.cantshow": "The browser can't show this file:", "rd.locate": "Find in the original",
   "st.title": "Storage", "st.total": "{n} in all", "st.disk": "{free} free of {size}", "st.files": "{n} files",
   "st.database": "Health database", "st.reports": "Checkups", "st.chats": "AI chat backups", "st.settings": "App settings backups", "st.csv": "CSV files", "st.other": "Other",
   "ok": "OK", "fail": "Failed", "never": "Never", "none": "Nothing yet.", "types": "types",
@@ -128,6 +136,7 @@ function attachTips(el) {
 // ------------------------------------------------------------------ tabs
 const tabs = ["overview", "history", "devices", "reports"];
 function show(tab) {
+  tab = tab.split("/")[0]; // #reports/<id>/<item> opens a report
   if (!tabs.includes(tab)) tab = "overview";
   for (const name of tabs) $(`#tab-${name}`).hidden = name !== tab;
   document.querySelectorAll(".tabs button").forEach(b => b.setAttribute("aria-selected", b.dataset.tab === tab));
@@ -334,10 +343,101 @@ document.addEventListener("click", async e => {
 // ------------------------------------------------------------------ reports
 async function loadReports() {
   const reps = await api("/api/reports");
-  $("#reports tbody").innerHTML = reps.length ? reps.map(r => `<tr><td class="nowrap">${esc(r.date)}</td><td>${esc(r.institution)}</td>
+  $("#reports tbody").innerHTML = reps.length ? reps.map(r => `<tr data-report="${esc(r.id)}" class="${r.id === repSel ? "sel" : ""}"><td class="nowrap">${esc(r.date)}</td><td>${esc(r.title || r.institution)}</td>
     <td class="num">${r.items}</td><td class="num">${r.flagged ? `<span class="badge bad">${r.flagged}</span>` : "0"}</td><td class="nowrap">${when(r.received)}</td></tr>`).join("")
     : `<tr><td colspan="5" class="empty">${t("rep.none")}</td></tr>`;
+  // #reports/<id>/<item>: open a report (and an item) straight away, as the desktop app links
+  const m = location.hash.match(/^#reports\/([^/]+)(?:\/(\d+))?/);
+  if (m && !repDetail) openReport(decodeURIComponent(m[1]), m[2] !== undefined ? +m[2] : null);
 }
+
+let repSel = null, repDetail = null, pdfLib = null;
+const pdfDocs = {};
+async function openReport(id, item) {
+  repSel = id;
+  document.querySelectorAll("#reports tbody tr").forEach(tr => tr.classList.toggle("sel", tr.dataset.report === id));
+  const d = await api("/api/reports/" + encodeURIComponent(id));
+  repDetail = d;
+  const r = d.report;
+  $("#report-detail").hidden = false;
+  $("#rd-title").textContent = r.title || r.institution || r.date;
+  $("#rd-sub").textContent = [r.date, r.title ? r.institution : "", t("rd.files", { n: d.files.length })].filter(Boolean).join(" · ");
+  $("#rd-items tbody").innerHTML = r.items.map((it, i) => {
+    const bad = /^(high|low|h|l|abnormal)$/i.test(it.flag);
+    const orig = it.originalName && it.originalName !== it.name ? `<div class="muted small">${esc(it.originalName)}</div>` : "";
+    return `<tr data-item="${i}" class="${it.location ? "locatable" : ""}"><td>${esc(it.name)}${orig}</td>
+      <td class="num nowrap">${bad ? `<b class="bad-text">${esc(it.value)}</b>` : esc(it.value)} <span class="muted">${esc(it.unit)}</span></td>
+      <td class="muted nowrap">${esc(it.range)}</td><td class="nowrap">${it.location ? `<span class="loc" title="${esc(t("rd.locate"))}">⌖</span>` : ""}</td></tr>`;
+  }).join("") || `<tr><td colspan="4" class="empty">${t("none")}</td></tr>`;
+  $("#rd-files").innerHTML = d.files.map(f => `<a href="${fileURL(id, f.name)}" target="_blank" rel="noopener">${esc(f.name)}</a>`).join(" · ") ||
+    `<span class="muted">${t("rd.nofiles")}</span>`;
+  $("#rd-page").innerHTML = `<p class="empty">${t(d.files.length ? "rd.pick" : "rd.nofiles")}</p>`;
+  $("#report-detail").scrollIntoView({ behavior: "smooth", block: "start" });
+  if (item != null && r.items[item]) showItem(item);
+}
+const fileURL = (id, name) => `/api/reports/${encodeURIComponent(id)}/files/${encodeURIComponent(name)}`;
+
+// showItem shows the page of the original the item is on, with its row framed.
+async function showItem(i) {
+  const it = repDetail.report.items[i];
+  document.querySelectorAll("#rd-items tbody tr").forEach(tr => tr.classList.toggle("sel", +tr.dataset.item === i));
+  history.replaceState(null, "", `#reports/${encodeURIComponent(repDetail.report.id)}/${i}`);
+  const box = $("#rd-page");
+  const loc = it.location;
+  if (!loc) { box.innerHTML = `<p class="empty">${t("rd.noloc")}</p>`; return; }
+  const file = repDetail.files.find(f => f.name === loc.file);
+  if (!file) { box.innerHTML = `<p class="empty">${t("rd.missing", { name: esc(loc.file) })}</p>`; return; }
+  const url = fileURL(repDetail.report.id, file.name);
+  const frame = `<div class="rd-hl" style="left:${loc.x * 100}%;top:${loc.y * 100}%;width:${loc.w * 100}%;height:${loc.h * 100}%"></div>`;
+  const caption = `<p class="muted small">${esc(file.name)}${file.type === "application/pdf" ? " · " + t("rd.page", { n: loc.page + 1 }) : ""}</p>`;
+  if (file.type.startsWith("image/")) {
+    box.innerHTML = `${caption}<div class="rd-sheet"><img src="${url}" alt="">${frame}</div>`;
+    const img = box.querySelector("img");
+    img.onload = () => box.querySelector(".rd-hl").scrollIntoView({ block: "center", behavior: "smooth" });
+    img.onerror = () => { box.innerHTML = `<p class="empty">${t("rd.cantshow")} <a href="${url}" target="_blank">${esc(file.name)}</a></p>`; };
+    return;
+  }
+  if (file.type !== "application/pdf") { box.innerHTML = `<p class="empty"><a href="${url}" target="_blank">${esc(file.name)}</a></p>`; return; }
+  box.innerHTML = `${caption}<p class="empty">…</p>`;
+  try {
+    pdfLib = pdfLib || await loadPDFJS();
+    const doc = pdfDocs[url] || (pdfDocs[url] = await pdfLib.getDocument(url).promise);
+    const page = await doc.getPage(loc.page + 1);
+    const vp1 = page.getViewport({ scale: 1 });
+    const scale = Math.min(3, Math.max(1, (box.clientWidth * devicePixelRatio) / vp1.width));
+    const vp = page.getViewport({ scale });
+    const canvas = document.createElement("canvas");
+    canvas.width = vp.width; canvas.height = vp.height;
+    await page.render({ canvasContext: canvas.getContext("2d"), viewport: vp }).promise;
+    box.innerHTML = `${caption}<div class="rd-sheet">${frame}</div>`;
+    box.querySelector(".rd-sheet").prepend(canvas);
+    box.querySelector(".rd-hl").scrollIntoView({ block: "center", behavior: "smooth" });
+  } catch (err) {
+    // no pdf.js (offline): the browser's own viewer, at the page
+    box.innerHTML = `${caption}<iframe class="rd-pdf" src="${url}#page=${loc.page + 1}"></iframe>`;
+  }
+}
+
+// pdf.js draws the PDF page, so the frame can sit on the item's row.
+function loadPDFJS() {
+  return new Promise((ok, fail) => {
+    const s = document.createElement("script");
+    s.src = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
+    s.onload = () => {
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+      ok(window.pdfjsLib);
+    };
+    s.onerror = fail;
+    document.head.appendChild(s);
+  });
+}
+
+document.addEventListener("click", e => {
+  const rep = e.target.closest("#reports tbody tr[data-report]");
+  if (rep) { openReport(rep.dataset.report, null).catch(err => alert(err.message)); return; }
+  const item = e.target.closest("#rd-items tbody tr[data-item]");
+  if (item) showItem(+item.dataset.item);
+});
 
 // ------------------------------------------------------------------ live refresh
 setInterval(() => {

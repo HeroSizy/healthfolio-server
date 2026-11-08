@@ -124,3 +124,19 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 1
 .sttable td.path code { font-size: 12px; color: var(--muted); }
 .sttable .dot { display: inline-block; width: 8px; height: 8px; border-radius: 4px; margin-right: 8px; }
 @media (max-width: 600px) { .sttable td.path { display: none; } }
+#reports tbody tr[data-report] { cursor: pointer; }
+#reports tbody tr.sel, #rd-items tbody tr.sel { background: var(--accent-soft); }
+.rd-grid { display: grid; grid-template-columns: minmax(280px, 1fr) minmax(320px, 1.4fr); gap: 16px; align-items: start; }
+.rd-items { max-height: 75vh; overflow: auto; }
+#rd-items tbody tr.locatable { cursor: pointer; }
+#rd-items .loc { color: var(--accent); font-size: 16px; }
+.small { font-size: 12px; }
+.bad-text { color: var(--bad); }
+.rd-files { font-size: 13px; margin-bottom: 8px; word-break: break-all; }
+.rd-page { max-height: 75vh; overflow: auto; border-radius: 8px; }
+.rd-sheet { position: relative; line-height: 0; }
+.rd-sheet img, .rd-sheet canvas { width: 100%; height: auto; display: block; border-radius: 6px; background: #fff; }
+.rd-hl { position: absolute; border: 2px solid var(--accent); background: rgba(255, 55, 95, .15); border-radius: 3px;
+  box-shadow: 0 0 0 4px rgba(255, 55, 95, .18); pointer-events: none; }
+.rd-pdf { width: 100%; height: 70vh; border: 0; border-radius: 6px; }
+@media (max-width: 800px) { .rd-grid { grid-template-columns: 1fr; } }

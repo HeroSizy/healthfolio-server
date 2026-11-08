@@ -3,6 +3,16 @@
 Releases happen on their own: bump `version` in mygo.json, add its section here, push to
 main. The desktop app shows the section of a new version in its update window.
 
+## 0.0.10
+
+- Checkup reports keep everything the app sends: where each item is in the original, the
+  name as printed, the title and the list of originals. Every original file is kept (a
+  report can have several), checked against its SHA-256.
+- In the dashboard, click a checkup to see its items, and click an item to see it framed
+  on its page of the original PDF or photo. In the app, Checkups › Items opens it.
+- AI assistants (MCP) can now also list the checkup reports, read their original files,
+  see where each item is printed, and read the iPhone app's AI conversations and settings.
+
 ## 0.0.9
 
 - The health database is about a quarter smaller: an index that repeated another one is

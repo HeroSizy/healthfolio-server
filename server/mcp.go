@@ -18,6 +18,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"path/filepath"
 	"os"
 	"strings"
 	"time"
@@ -45,7 +46,8 @@ type rpcErr struct {
 }
 
 type MCP struct {
-	db *sql.DB // read-only connection
+	db  *sql.DB // read-only connection
+	dir string  // the data folder: chats/, settings/ (reports know their own folders)
 }
 
 func OpenMCP(dbPath string) (*MCP, error) {
@@ -53,8 +55,11 @@ func OpenMCP(dbPath string) (*MCP, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &MCP{db: db}, db.Ping()
+	return &MCP{db: db, dir: filepath.Dir(dbPath)}, db.Ping()
 }
+
+// allTools is every tool the server offers.
+func allTools() []tool { return append(append([]tool{}, mcpTools...), mcpFileTools...) }
 
 type tool struct {
 	Name        string         `json:"name"`
@@ -102,7 +107,7 @@ var mcpTools = []tool{
 			"from": prop("string", "Earliest report date, YYYY-MM-DD"),
 		}), Annotations: readOnly},
 	{Name: "query_sql", Title: "Read-only SQL",
-		Description: "Run a read-only SQLite query. Tables: records(type, start, end, value, num, unit, source, received, uuid, source_bundle, source_version, device_model, device_software, user_entered, tz, metadata, deleted_at), daily view(type, day, unit, total, mean, min, max, n), checkup(report_id, date, institution, name, key, value, num, unit, range, flag). Views of live samples: v_heart_rate, v_resting_heart_rate, v_hrv, v_steps, v_weight, v_spo2 (uuid, start_at, end_at, <value>, source, device_model), v_sleep (stage), v_workouts (activity, duration_s, distance_km, active_energy_kcal, avg_heart_rate). `start`/`end` are ISO 8601 strings with time zone; `num` is the numeric value; `metadata` is JSON text (use json_extract). Rows with `deleted_at` set were deleted in Apple Health: add `WHERE deleted_at IS NULL` when querying records. At most 1000 rows are returned.",
+		Description: "Run a read-only SQLite query. Tables: records(type, start, end, value, num, unit, source, received, uuid, source_bundle, source_version, device_model, device_software, user_entered, tz, metadata, deleted_at), daily view(type, day, unit, total, mean, min, max, n), checkup(report_id, date, institution, name, key, value, num, unit, range, flag, original_name, loc_file, loc_page, loc_x, loc_y, loc_w, loc_h), reports(id, date, institution, title, items, folder, received, originals JSON), sync_log(time, kind, device, received, added, ok, message). Views of live samples: v_heart_rate, v_resting_heart_rate, v_hrv, v_steps, v_weight, v_spo2 (uuid, start_at, end_at, <value>, source, device_model), v_sleep (stage), v_workouts (activity, duration_s, distance_km, active_energy_kcal, avg_heart_rate). `start`/`end` are ISO 8601 strings with time zone; `num` is the numeric value; `metadata` is JSON text (use json_extract). Rows with `deleted_at` set were deleted in Apple Health: add `WHERE deleted_at IS NULL` when querying records. At most 1000 rows are returned.",
 		InputSchema: obj(map[string]any{"sql": prop("string", "A single SELECT statement")}, "sql"), Annotations: readOnly},
 }
 
@@ -134,14 +139,14 @@ func (m *MCP) Handle(raw []byte) *rpcResp {
 			"protocolVersion": v,
 			"capabilities":    map[string]any{"tools": map[string]any{}, "prompts": map[string]any{}, "resources": map[string]any{}},
 			"serverInfo":      map[string]any{"name": "healthsync", "title": "HealthSync", "version": version},
-			"instructions": "Personal Apple Health data synced from the user's iPhone, plus medical checkup results. " +
-				"Start with list_data_types. Times are ISO 8601 with the phone's time zone. This is the user's private health data: " +
+			"instructions": "Personal Apple Health data synced from the user's iPhone, plus medical checkup results with their original PDFs and photos, " +
+				"and the conversations and settings of the HealthSync iPhone app. Start with list_data_types (or list_checkup_reports for checkups). Times are ISO 8601 with the phone's time zone. This is the user's private health data: " +
 				"answer their questions, don't speculate beyond what the data shows, and suggest a doctor for medical decisions.",
 		}
 	case "ping":
 		resp.Result = map[string]any{}
 	case "tools/list":
-		resp.Result = map[string]any{"tools": mcpTools}
+		resp.Result = map[string]any{"tools": allTools()}
 	case "tools/call":
 		var p struct {
 			Name      string         `json:"name"`
@@ -154,6 +159,10 @@ func (m *MCP) Handle(raw []byte) *rpcResp {
 		out, err := m.call(p.Name, p.Arguments)
 		if err != nil {
 			resp.Result = map[string]any{"isError": true, "content": []any{map[string]any{"type": "text", "text": err.Error()}}}
+			break
+		}
+		if c, ok := out.(mcpContent); ok {
+			resp.Result = map[string]any{"content": []any(c)}
 			break
 		}
 		b, _ := json.Marshal(out)
@@ -214,6 +223,9 @@ func (m *MCP) resolveType(t string) (string, error) {
 }
 
 func (m *MCP) call(name string, a map[string]any) (any, error) {
+	if out, ok, err := m.callFiles(name, a); ok {
+		return out, err
+	}
 	switch name {
 	case "list_data_types":
 		return m.rows(`SELECT type, COUNT(*) AS count, MAX(unit) AS unit, MIN(substr(start,1,10)) AS first_day, MAX(substr(start,1,10)) AS last_day
@@ -248,7 +260,8 @@ func (m *MCP) call(name string, a map[string]any) (any, error) {
 			t, from, to, limit)
 		return map[string]any{"type": t, "records": rows}, err
 	case "get_checkups":
-		q := `SELECT date, institution, name, key, value, unit, range, flag FROM checkup WHERE 1=1`
+		q := `SELECT report_id, date, institution, name, original_name, key, value, unit, range, flag,
+			loc_file, loc_page, loc_x, loc_y, loc_w, loc_h FROM checkup WHERE 1=1`
 		var args []any
 		if n := argStr(a, "name"); n != "" {
 			q += ` AND (lower(name) LIKE '%' || lower(?) || '%' OR lower(key) LIKE '%' || lower(?) || '%')`
@@ -420,7 +433,7 @@ func mcpConnect(serverName, url, token string) MCPConnect {
 - Server: HealthSync on %s
 - Transport: Streamable HTTP, JSON-RPC 2.0, POST %s
 - Auth header: Authorization: %s
-- Tools: list_data_types, daily_summary, get_records, get_checkups, query_sql
+- Tools: list_data_types, daily_summary, get_records, get_checkups, list_checkup_reports, get_report_file, list_ai_chats, get_ai_chat, get_app_settings, query_sql
 
 Start with list_data_types to see which Apple Health types exist, then use daily_summary for trends.
 The server is on my home network (plain HTTP); you must run on a machine in the same network or over my VPN.

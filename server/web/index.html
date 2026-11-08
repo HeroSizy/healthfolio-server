@@ -147,6 +147,18 @@
         <th data-i18n="col.date">Date</th><th data-i18n="rep.inst">Institution</th><th class="num" data-i18n="rep.items">Items</th><th class="num" data-i18n="rep.flagged">Flagged</th><th data-i18n="rep.received">Received</th>
       </tr></thead><tbody></tbody></table></div>
     </div>
+    <div class="card" id="report-detail" hidden>
+      <div class="card-head"><h2 id="rd-title"></h2><span class="muted" id="rd-sub"></span></div>
+      <div class="rd-grid">
+        <div class="scroll rd-items"><table class="list" id="rd-items"><thead><tr>
+          <th data-i18n="rd.item">Item</th><th class="num" data-i18n="rd.value">Value</th><th data-i18n="rd.range">Range</th><th></th>
+        </tr></thead><tbody></tbody></table></div>
+        <div class="rd-viewer">
+          <div class="rd-files" id="rd-files"></div>
+          <div class="rd-page" id="rd-page"><p class="empty" data-i18n="rd.pick">Click an item to see where it is in the original.</p></div>
+        </div>
+      </div>
+    </div>
   </section>
 </main>
 <footer><a href="https://github.com/herosizy/healthsync-server" target="_blank" rel="noopener">healthsync-server</a> <span id="ver"></span></footer>

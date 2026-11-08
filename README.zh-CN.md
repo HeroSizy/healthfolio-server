@@ -345,7 +345,7 @@ App 使用下面的接口。其它客户端也可以使用。
 | `POST /backup/settings` | 设备令牌。以 JSON 对象发送 App 设置，不要包含密钥或密码。名字像密钥的字符串值（`apiKey`、`token`、`password` 等）会被丢弃，并在 `{"ok":true,"dropped":[…]}` 里列出。保存为 `settings/device-<id>.json`。 |
 | `GET /backup/settings` | 设备令牌。这台设备的设置；从没发过设置的设备会拿到任意设备最新的一份：`{"device","device_id","saved","settings":{…}}`。 |
 | `POST /ingest` | 发送 `Authorization: Bearer <token>`。请求体是下面的一种：每行一条记录 `type\|start\|end\|value\|unit\|source`；JSON 数组；`{"records":[…],"deleted":["uuid",…]}`；JSON Lines；带表头的 CSV 或 TSV。返回 `{"ok":true,"received":n,"added":{…},"deleted":n}`。 |
-| `POST /report` | 发送 `{"report":{"id","date","institution","items":[{name,key,value,unit,range,flag}]},"folder":…,"files":[{"name","data"(base64)}]}`。 |
+| `POST /report` | 发送 `{"report":{"id","date","institution","title","items":[{name,originalName,key,value,unit,range,flag,location:{file,page,x,y,w,h}}],"originals":[{name,type,size,sha256}]},"folder":…,"files":[{"name","data"(base64)}]}`。`location` 是项目在原件里的位置：文件名、页码（从 0 开始）、按页面比例的框（左上角为原点）。服务器保存全部文件，`report.json` 按收到的原样保存（不认识的字段也保留）；文件的 SHA-256 和 `originals` 不一致时拒收。返回 `{"ok":true,"folder","stores","files":[{name,size,sha256}]}`。在控制面板里点报告、再点项目，就能在原件上看到框出的那一行。 |
 | `GET /stats` | 返回每种类型的记录数。 |
 | `POST /mcp` | MCP（Streamable HTTP，JSON 响应）。发送 Bearer 令牌。 |
 | `POST /mcp/tokens` | 发送设备的 Bearer 令牌和 `{"name":"Claude"}`。返回给 AI 助手的新只读令牌（scope 为 `mcp`，只能用于 `/mcp` 和 `/auth`，其它接口返回 `403` 和 `"reason":"read_only"`）和可以复制的配置：`{"url","token","transport","configs":{"claude_code","json","stdio_bridge","agent_prompt"},"config_list":[{"id","title","text"}]}`。你可以撤销这个令牌。AI 助手访问关闭时返回 `403`。 |

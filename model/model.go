@@ -61,6 +61,8 @@ type ReportRow struct {
 	Items       int    `json:"items"`
 	Flagged     int    `json:"flagged"`
 	Received    string `json:"received"`
+	Title       string `json:"title,omitempty"`
+	Files       int    `json:"files"` // original files kept
 }
 
 type DailyPoint struct {

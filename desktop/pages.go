@@ -3,6 +3,7 @@ package desktop
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -661,7 +662,9 @@ func (a *App) reportsPage(c *ui.Context, pal *palette) {
 		{Title: a.t("日期", "Date"), Width: 110}, {Title: a.t("机构", "Institution")},
 		{Title: a.t("项目", "Items"), Width: 80, Align: ui.End}, {Title: a.t("异常", "Flagged"), Width: 80, Align: ui.End},
 		{Title: a.t("收到", "Received"), Width: 110},
+		{Title: "", Width: 110},
 	}
+	b, _ := a.host.Backend()
 	ui.Column(c).Grow(1).MinHeight(0).Padding(0, 12, 12, 12).Children(func() {
 		ui.Table(c, &a.repList, cols, len(a.reports), func(row, col int) {
 			r := a.reports[row]
@@ -679,6 +682,11 @@ func (a *App) reportsPage(c *ui.Context, pal *palette) {
 				}
 			case 4:
 				ui.Text(c, when(r.Received)).FontSize(12).TextColor(pal.textMuted)
+			case 5:
+				// the items and where each is in the originals, in the web dashboard
+				if b != nil && ui.Button(c.Key("rep-open-"+r.ID), a.t("查看项目", "Items")).Tooltip(a.t("在网页面板里查看项目，点项目可在原件里定位", "See the items in the web dashboard; click one to find it in the original")).Clicked() {
+					a.host.OpenURL(strings.TrimSuffix(b.DashboardURL(), "/") + "/#reports/" + url.PathEscape(r.ID))
+				}
 			}
 		}).Grow(1)
 	})

@@ -71,7 +71,7 @@ func TestMCP(t *testing.T) {
 	var tl struct {
 		Result struct{ Tools []tool } `json:"result"`
 	}
-	if len(lines) != 2 || json.Unmarshal([]byte(lines[1]), &tl) != nil || len(tl.Result.Tools) != len(mcpTools) {
+	if len(lines) != 2 || json.Unmarshal([]byte(lines[1]), &tl) != nil || len(tl.Result.Tools) != len(allTools()) {
 		t.Fatalf("stdio: %q", buf.String())
 	}
 }

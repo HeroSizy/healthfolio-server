@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -24,6 +25,8 @@ type DB struct {
 	path  string
 	mu    sync.Mutex // serialises writes
 	onLog func(LogEntry)
+	// compacted is closed when the background compaction after opening is done
+	compacted chan struct{}
 }
 
 const schema = `
@@ -92,8 +95,11 @@ func OpenDB(path string) (*DB, error) {
 		db.Close()
 		return nil, fmt.Errorf("migrate %s: %w", path, err)
 	}
-	d := &DB{sql: db, path: path}
-	go d.compact()
+	d := &DB{sql: db, path: path, compacted: make(chan struct{})}
+	go func() {
+		defer close(d.compacted)
+		d.compact()
+	}()
 	return d, nil
 }
 
@@ -165,6 +171,15 @@ func migrate(db *sql.DB) error {
 	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS records_start ON records(start)`); err != nil {
 		return err
 	}
+	// checkups: the name as printed and where each item is in the original files; the
+	// report's title and its list of original files (JSON)
+	if err := addColumns(db, "checkup", [][2]string{{"original_name", "TEXT"}, {"loc_file", "TEXT"}, {"loc_page", "INTEGER"},
+		{"loc_x", "REAL"}, {"loc_y", "REAL"}, {"loc_w", "REAL"}, {"loc_h", "REAL"}}); err != nil {
+		return err
+	}
+	if err := addColumns(db, "reports", [][2]string{{"title", "TEXT"}, {"originals", "TEXT"}}); err != nil {
+		return err
+	}
 	// records_type_start repeated the start of the UNIQUE (type, start, …) index, which
 	// answers the same queries: it took about a sixth of the file for nothing.
 	if _, err := db.Exec(`DROP INDEX IF EXISTS records_type_start`); err != nil {
@@ -206,7 +221,12 @@ func addColumns(db *sql.DB, table string, cols [][2]string) error {
 	return nil
 }
 
-func (d *DB) Close() error { return d.sql.Close() }
+func (d *DB) Close() error {
+	if d.compacted != nil {
+		<-d.compacted
+	}
+	return d.sql.Close()
+}
 
 func nowISO() string { return time.Now().Format(time.RFC3339) }
 
@@ -303,11 +323,16 @@ func nullable(s string) any {
 	return s
 }
 
+// Report is what the database keeps of a checkup report. report.json in its folder keeps
+// everything the app sent, including fields this server does not know.
 type Report struct {
 	ID          string       `json:"id"`
 	Date        string       `json:"date"`
 	Institution string       `json:"institution"`
+	Title       string       `json:"title,omitempty"`
 	Items       []ReportItem `json:"items"`
+	// Originals lists the report's original files (PDFs, photos), when the app sent it.
+	Originals []OriginalFile `json:"originals,omitempty"`
 }
 
 type ReportItem struct {
@@ -317,6 +342,28 @@ type ReportItem struct {
 	Unit  string `json:"unit"`
 	Range string `json:"range"`
 	Flag  string `json:"flag"`
+	// OriginalName is the name as printed in the report, when it differs from Name.
+	OriginalName string `json:"originalName,omitempty"`
+	// Location is where the item is in the original files.
+	Location *ItemLocation `json:"location,omitempty"`
+}
+
+// ItemLocation is a box on a page of one of the original files: File is its name, Page
+// counts from 0, and X, Y, W, H are fractions of the page, from its top left corner.
+type ItemLocation struct {
+	File string  `json:"file"`
+	Page int     `json:"page"`
+	X    float64 `json:"x"`
+	Y    float64 `json:"y"`
+	W    float64 `json:"w"`
+	H    float64 `json:"h"`
+}
+
+type OriginalFile struct {
+	Name   string `json:"name"`
+	Type   string `json:"type"`
+	Size   int64  `json:"size"`
+	SHA256 string `json:"sha256"`
 }
 
 func (d *DB) InsertReport(rep Report, folderName, folder string) (int, error) {
@@ -347,13 +394,24 @@ func (d *DB) InsertReport(rep Report, folderName, folder string) (int, error) {
 		if f, ok := asNumber(v); ok {
 			num = f
 		}
-		if _, err := tx.Exec(`INSERT OR REPLACE INTO checkup VALUES (?,?,?,?,?,?,?,?,?,?)`,
-			id, date, rep.Institution, it.Name, it.Key, v, num, it.Unit, it.Range, it.Flag); err != nil {
+		var lf, lp, lx, ly, lw, lh any
+		if l := it.Location; l != nil {
+			lf, lp, lx, ly, lw, lh = l.File, l.Page, l.X, l.Y, l.W, l.H
+		}
+		if _, err := tx.Exec(`INSERT OR REPLACE INTO checkup (report_id, date, institution, name, key, value, num, unit, range, flag,
+				original_name, loc_file, loc_page, loc_x, loc_y, loc_w, loc_h) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			id, date, rep.Institution, it.Name, it.Key, v, num, it.Unit, it.Range, it.Flag,
+			nullable(it.OriginalName), lf, lp, lx, ly, lw, lh); err != nil {
 			return 0, err
 		}
 	}
-	if _, err := tx.Exec(`INSERT OR REPLACE INTO reports VALUES (?,?,?,?,?,?)`,
-		id, date, rep.Institution, len(rep.Items), folder, nowISO()); err != nil {
+	var originals any
+	if len(rep.Originals) > 0 {
+		b, _ := json.Marshal(rep.Originals)
+		originals = string(b)
+	}
+	if _, err := tx.Exec(`INSERT OR REPLACE INTO reports (id, date, institution, items, folder, received, title, originals) VALUES (?,?,?,?,?,?,?,?)`,
+		id, date, rep.Institution, len(rep.Items), folder, nowISO(), nullable(rep.Title), originals); err != nil {
 		return 0, err
 	}
 	return len(rep.Items), tx.Commit()
@@ -675,7 +733,8 @@ type ReportRow = model.ReportRow
 
 func (d *DB) Reports() ([]ReportRow, error) {
 	rows, err := d.sql.Query(`SELECT c.report_id, MAX(c.date), MAX(COALESCE(c.institution,'')), COUNT(*),
-	        SUM(CASE WHEN c.flag IN ('high','low','H','L','abnormal') THEN 1 ELSE 0 END), COALESCE(MAX(r.received),'')
+	        SUM(CASE WHEN c.flag IN ('high','low','H','L','abnormal') THEN 1 ELSE 0 END), COALESCE(MAX(r.received),''),
+	        COALESCE(MAX(r.title),''), COALESCE(MAX(r.folder),'')
 	    FROM checkup c LEFT JOIN reports r ON r.id = c.report_id
 	    GROUP BY c.report_id ORDER BY MAX(c.date) DESC`)
 	if err != nil {
@@ -685,12 +744,69 @@ func (d *DB) Reports() ([]ReportRow, error) {
 	out := []ReportRow{}
 	for rows.Next() {
 		var r ReportRow
-		if err := rows.Scan(&r.ID, &r.Date, &r.Institution, &r.Items, &r.Flagged, &r.Received); err != nil {
+		var folder string
+		if err := rows.Scan(&r.ID, &r.Date, &r.Institution, &r.Items, &r.Flagged, &r.Received, &r.Title, &folder); err != nil {
 			return nil, err
 		}
+		r.Files = len(originalFiles(folder))
 		out = append(out, r)
 	}
 	return out, rows.Err()
+}
+
+// originalFiles are the files in a report's folder other than report.json.
+func originalFiles(folder string) []string {
+	if folder == "" {
+		return nil
+	}
+	entries, _ := os.ReadDir(folder)
+	var out []string
+	for _, e := range entries {
+		if !e.IsDir() && e.Name() != "report.json" && !strings.HasPrefix(e.Name(), ".") {
+			out = append(out, e.Name())
+		}
+	}
+	return out
+}
+
+// ReportDetail is one report with its items, where each is in the original files, and
+// the original files kept in its folder. folder is "" for an unknown report.
+func (d *DB) ReportDetail(id string) (rep Report, folder string, err error) {
+	var originals sql.NullString
+	var title sql.NullString
+	err = d.sql.QueryRow(`SELECT id, COALESCE(date,''), COALESCE(institution,''), title, COALESCE(folder,''), originals FROM reports WHERE id = ?`, id).
+		Scan(&rep.ID, &rep.Date, &rep.Institution, &title, &folder, &originals)
+	if err != nil {
+		return rep, "", err
+	}
+	rep.Title = title.String
+	if originals.Valid {
+		_ = json.Unmarshal([]byte(originals.String), &rep.Originals)
+	}
+	rows, err := d.sql.Query(`SELECT name, COALESCE(key,''), COALESCE(value,''), COALESCE(unit,''), COALESCE(range,''), COALESCE(flag,''),
+			COALESCE(original_name,''), loc_file, loc_page, loc_x, loc_y, loc_w, loc_h
+		FROM checkup WHERE report_id = ? ORDER BY rowid`, id)
+	if err != nil {
+		return rep, folder, err
+	}
+	defer rows.Close()
+	rep.Items = []ReportItem{}
+	for rows.Next() {
+		var it ReportItem
+		var v string
+		var lf sql.NullString
+		var lp sql.NullInt64
+		var lx, ly, lw, lh sql.NullFloat64
+		if err := rows.Scan(&it.Name, &it.Key, &v, &it.Unit, &it.Range, &it.Flag, &it.OriginalName, &lf, &lp, &lx, &ly, &lw, &lh); err != nil {
+			return rep, folder, err
+		}
+		it.Value = v
+		if lf.Valid {
+			it.Location = &ItemLocation{File: lf.String, Page: int(lp.Int64), X: lx.Float64, Y: ly.Float64, W: lw.Float64, H: lh.Float64}
+		}
+		rep.Items = append(rep.Items, it)
+	}
+	return rep, folder, rows.Err()
 }
 
 type DailyPoint = model.DailyPoint

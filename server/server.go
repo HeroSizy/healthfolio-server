@@ -1,9 +1,12 @@
 package server
 
 import (
+	"bytes"
+	"crypto/sha256"
 	"crypto/subtle"
 	"embed"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -135,6 +138,8 @@ func (s *Server) routes() {
 	m.HandleFunc("DELETE /api/pair", s.admin(s.apiPairCancel))
 	m.HandleFunc("POST /api/pair/pending/{id}", s.admin(s.apiPairAnswer))
 	m.HandleFunc("GET /api/reports", s.admin(s.apiReports))
+	m.HandleFunc("GET /api/reports/{id}", s.admin(s.apiReport))
+	m.HandleFunc("GET /api/reports/{id}/files/{name}", s.admin(s.apiReportFile))
 	m.HandleFunc("GET /api/daily", s.admin(s.apiDaily))
 	m.HandleFunc("GET /api/token", s.admin(s.apiToken))
 	s.mux = m
@@ -465,15 +470,22 @@ func (s *Server) handleReport(w http.ResponseWriter, r *http.Request) {
 	}
 	device := dev.Name
 	var req struct {
-		Report *Report `json:"report"`
-		Folder string  `json:"folder"`
+		// kept as sent, so report.json has every field the app knows (locations of the
+		// items, the list of originals, …), not just those this server reads
+		Raw    json.RawMessage `json:"report"`
+		Report *Report         `json:"-"`
+		Folder string          `json:"folder"`
 		Files  []struct {
 			Name string `json:"name"`
 			Data string `json:"data"`
 		} `json:"files"`
 	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxReportBody)).Decode(&req); err != nil || req.Report == nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxReportBody)).Decode(&req); err != nil || len(req.Raw) == 0 {
 		errJSON(w, 400, "could not parse report")
+		return
+	}
+	if err := json.Unmarshal(req.Raw, &req.Report); err != nil || req.Report == nil {
+		errJSON(w, 400, "could not parse report: "+fmt.Sprint(err))
 		return
 	}
 	name := safeName(firstNonEmpty(req.Folder, req.Report.ID))
@@ -494,6 +506,13 @@ func (s *Server) handleReport(w http.ResponseWriter, r *http.Request) {
 		errJSON(w, 500, err.Error())
 		return
 	}
+	// Every original file is kept under its own name; each is checked against the hash in
+	// the report's list of originals, when there is one.
+	want := map[string]string{}
+	for _, o := range req.Report.Originals {
+		want[o.Name] = strings.ToLower(o.SHA256)
+	}
+	saved := []map[string]any{}
 	for _, f := range req.Files {
 		fn := filepath.Base(f.Name)
 		if fn == "." || fn == "/" || fn == "" || fn == "report.json" {
@@ -504,13 +523,23 @@ func (s *Server) handleReport(w http.ResponseWriter, r *http.Request) {
 			errJSON(w, 400, "bad base64 in "+fn)
 			return
 		}
-		if err := os.WriteFile(filepath.Join(folder, fn), data, 0o600); err != nil {
+		sum := sha256.Sum256(data)
+		hexSum := hex.EncodeToString(sum[:])
+		if h, ok := want[fn]; ok && h != "" && h != hexSum {
+			errJSON(w, 400, fn+": its SHA-256 does not match the list of originals")
+			return
+		}
+		if err := writeFileAtomic(filepath.Join(folder, fn), data); err != nil {
 			errJSON(w, 500, err.Error())
 			return
 		}
+		saved = append(saved, map[string]any{"name": fn, "size": len(data), "sha256": hexSum})
 	}
-	pretty, _ := json.MarshalIndent(req.Report, "", "  ")
-	if err := os.WriteFile(filepath.Join(folder, "report.json"), pretty, 0o600); err != nil {
+	var pretty bytes.Buffer
+	if json.Indent(&pretty, req.Raw, "", "  ") != nil {
+		pretty.Write(req.Raw)
+	}
+	if err := writeFileAtomic(filepath.Join(folder, "report.json"), pretty.Bytes()); err != nil {
 		errJSON(w, 500, err.Error())
 		return
 	}
@@ -532,7 +561,7 @@ func (s *Server) handleReport(w http.ResponseWriter, r *http.Request) {
 	s.db.Log(LogEntry{Kind: "report", Device: device, IP: clientIP(r), Received: len(req.Report.Items), Added: n,
 		OK: err == nil, Message: name, DurationMS: int(time.Since(start).Milliseconds())})
 	logf("received checkup report %s (%d items) from %s", name, len(req.Report.Items), device)
-	writeJSON(w, 200, map[string]any{"ok": true, "folder": folder, "stores": stores})
+	writeJSON(w, 200, map[string]any{"ok": true, "folder": folder, "stores": stores, "files": saved})
 }
 
 func (s *Server) handlePair(w http.ResponseWriter, r *http.Request) {
@@ -950,6 +979,66 @@ func (s *Server) apiReports(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, reps)
+}
+
+// apiReport is one report with its items, their places in the originals, and the
+// original files kept: GET /api/reports/{id}.
+func (s *Server) apiReport(w http.ResponseWriter, r *http.Request) {
+	rep, folder, err := s.db.ReportDetail(r.PathValue("id"))
+	if err != nil {
+		errJSON(w, 404, "no such report")
+		return
+	}
+	files := []map[string]any{}
+	for _, name := range originalFiles(folder) {
+		fi, err := os.Stat(filepath.Join(folder, name))
+		if err != nil {
+			continue
+		}
+		files = append(files, map[string]any{"name": name, "size": fi.Size(), "type": contentType(name)})
+	}
+	writeJSON(w, 200, map[string]any{"report": rep, "files": files, "folder": folder})
+}
+
+// apiReportFile serves one original file of a report: GET /api/reports/{id}/files/{name}.
+func (s *Server) apiReportFile(w http.ResponseWriter, r *http.Request) {
+	_, folder, err := s.db.ReportDetail(r.PathValue("id"))
+	name := r.PathValue("name")
+	if err != nil || folder == "" || name != filepath.Base(name) || name == "report.json" || strings.HasPrefix(name, ".") {
+		http.NotFound(w, r)
+		return
+	}
+	f, err := os.Open(filepath.Join(folder, name))
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	defer f.Close()
+	fi, err := f.Stat()
+	if err != nil || fi.IsDir() {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", contentType(name))
+	w.Header().Set("Cache-Control", "private, max-age=300")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	http.ServeContent(w, r, name, fi.ModTime(), f)
+}
+
+func contentType(name string) string {
+	switch strings.ToLower(filepath.Ext(name)) {
+	case ".pdf":
+		return "application/pdf"
+	case ".jpg", ".jpeg":
+		return "image/jpeg"
+	case ".png":
+		return "image/png"
+	case ".heic":
+		return "image/heic"
+	case ".webp":
+		return "image/webp"
+	}
+	return "application/octet-stream"
 }
 
 func (s *Server) apiDaily(w http.ResponseWriter, r *http.Request) {

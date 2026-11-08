@@ -145,7 +145,11 @@ const schemaDoc = "# health.db\n\n" +
 	"- `v_heart_rate(bpm)`, `v_resting_heart_rate(bpm)`, `v_hrv(ms)`, `v_steps(steps)`, `v_weight(kg)`, `v_spo2(percent)`: also uuid, start_at, end_at, source, device_model\n" +
 	"- `v_sleep(uuid, start_at, end_at, stage, source)`\n" +
 	"- `v_workouts(uuid, start_at, end_at, activity, duration_s, distance_km, active_energy_kcal, avg_heart_rate, source)`\n\n" +
-	"## checkup\nOne row per checkup item: report_id, date, institution, name, key, value, num, unit, range, flag (high/low/H/L/abnormal).\n"
+	"## checkup\nOne row per checkup item: report_id, date, institution, name, key, value, num, unit, range, flag (high/low/H/L/abnormal), " +
+	"original_name (as printed, when it differs), and where it is printed: loc_file, loc_page (from 0), loc_x, loc_y, loc_w, loc_h (fractions of the page from its top left).\n\n" +
+	"## reports\nOne row per checkup report: id, date, institution, title, items, folder, received, originals (JSON list of name, type, size, sha256). " +
+	"Read an original with the get_report_file tool.\n\n" +
+	"## Not in the database\nThe iPhone app's AI conversations (list_ai_chats, get_ai_chat) and its settings (get_app_settings).\n"
 
 var summaryTypes = []string{"StepCount", "ActiveEnergyBurned", "RestingHeartRate", "HeartRateVariabilitySDNN", "BodyMass", "OxygenSaturation"}
 
