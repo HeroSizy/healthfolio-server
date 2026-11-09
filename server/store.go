@@ -754,6 +754,30 @@ func (d *DB) Reports() ([]ReportRow, error) {
 	return out, rows.Err()
 }
 
+// ReportFolder is a report as kept on disk, for the phone's restore from backup.
+type ReportFolder struct {
+	ID, Date, Folder, Received string
+}
+
+// ReportFolders lists every report that has a folder, newest first.
+func (d *DB) ReportFolders() ([]ReportFolder, error) {
+	rows, err := d.sql.Query(`SELECT id, COALESCE(date,''), COALESCE(folder,''), received FROM reports
+		WHERE COALESCE(folder,'') != '' ORDER BY date DESC, received DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []ReportFolder{}
+	for rows.Next() {
+		var f ReportFolder
+		if err := rows.Scan(&f.ID, &f.Date, &f.Folder, &f.Received); err != nil {
+			return nil, err
+		}
+		out = append(out, f)
+	}
+	return out, rows.Err()
+}
+
 // originalFiles are the files in a report's folder other than report.json.
 func originalFiles(folder string) []string {
 	if folder == "" {

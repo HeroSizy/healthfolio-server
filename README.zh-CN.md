@@ -344,6 +344,9 @@ App 使用下面的接口。其它客户端也可以使用。
 | `POST /backup/chats/delete` | 设备令牌。发送 `{"ids":[…]}`。返回 `{"ok":true,"deleted":[…],"missing":[…]}`。 |
 | `POST /backup/settings` | 设备令牌。以 JSON 对象发送 App 设置，不要包含密钥或密码。名字像密钥的字符串值（`apiKey`、`token`、`password` 等）会被丢弃，并在 `{"ok":true,"dropped":[…]}` 里列出。保存为 `settings/device-<id>.json`。 |
 | `GET /backup/settings` | 设备令牌。这台设备的设置；从没发过设置的设备会拿到任意设备最新的一份：`{"device","device_id","saved","settings":{…}}`。 |
+| `GET /backup/reports` | 任何已配对的令牌（只读的 AI 令牌也可以）。保存的体检报告，新的在前，用来在手机上恢复：`{"reports":[{"id","folder","date","received","files":[{"name","size","sha256"}]}]}`。 |
+| `GET /backup/reports/{id}` | 任何已配对的令牌。报告的 `report.json`，和收到时一模一样。 |
+| `GET /backup/reports/{id}/files/{name}` | 任何已配对的令牌。报告的一个原件。 |
 | `POST /ingest` | 发送 `Authorization: Bearer <token>`。请求体是下面的一种：每行一条记录 `type\|start\|end\|value\|unit\|source`；JSON 数组；`{"records":[…],"deleted":["uuid",…]}`；JSON Lines；带表头的 CSV 或 TSV。返回 `{"ok":true,"received":n,"added":{…},"deleted":n}`。 |
 | `POST /report` | 发送 `{"report":{"id","date","institution","title","items":[{name,originalName,key,value,unit,range,flag,location:{file,page,x,y,w,h}}],"originals":[{name,type,size,sha256}]},"folder":…,"files":[{"name","data"(base64)}]}`。`location` 是项目在原件里的位置：文件名、页码（从 0 开始）、按页面比例的框（左上角为原点）。服务器保存全部文件，`report.json` 按收到的原样保存（不认识的字段也保留）；文件的 SHA-256 和 `originals` 不一致时拒收。返回 `{"ok":true,"folder","stores","files":[{name,size,sha256}]}`。在控制面板里点报告、再点项目，就能在原件上看到框出的那一行。 |
 | `GET /stats` | 返回每种类型的记录数。 |

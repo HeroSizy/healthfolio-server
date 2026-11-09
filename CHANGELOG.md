@@ -3,6 +3,11 @@
 Releases happen on their own: bump `version` in mygo.json, add its section here, push to
 main. The desktop app shows the section of a new version in its update window.
 
+## 0.0.11
+
+- A paired iPhone can read its checkup reports back (the report and every original file),
+  so the app can restore them from this server after a reinstall or on a new phone.
+
 ## 0.0.10
 
 - Checkup reports keep everything the app sends: where each item is in the original, the

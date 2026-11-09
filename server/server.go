@@ -108,6 +108,9 @@ func (s *Server) routes() {
 	m.HandleFunc("POST /backup/chats/delete", s.handleDeleteChats)
 	m.HandleFunc("POST /backup/settings", s.handleBackupSettings)
 	m.HandleFunc("GET /backup/settings", s.handleGetSettings)
+	m.HandleFunc("GET /backup/reports", s.handleListReports)
+	m.HandleFunc("GET /backup/reports/{id}", s.handleGetReport)
+	m.HandleFunc("GET /backup/reports/{id}/files/{name}", s.handleGetReportFile)
 	m.HandleFunc("POST /mcp", s.handleMCP)
 	m.HandleFunc("GET /mcp", s.handleMCP)
 	m.HandleFunc("DELETE /mcp", s.handleMCP)
@@ -328,8 +331,8 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		"pair_modes": s.dialogModes(), "stores": stores, "server": "healthsync-server/" + version,
 		"records": recordsVersion, "urls": s.urls(r), "mcp_enabled": s.db.MCPEnabled(),
 		// what this server can do beyond protocol 2: two-step pairing with a confirmation
-		// code, GET /auth, pairing again by device_id, and backups of AI chats and settings
-		"features": []string{"pair_requests", "auth", "device_id", "chats", "chats_delete", "settings"},
+		// code, GET /auth, pairing again by device_id, backups of AI chats and settings, and reading checkup reports back
+		"features": []string{"pair_requests", "auth", "device_id", "chats", "chats_delete", "settings", "reports_read"},
 	}
 	if s.db.MCPEnabled() {
 		out["mcp"] = "/mcp"
