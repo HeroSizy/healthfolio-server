@@ -420,13 +420,20 @@ type MCPConfig = model.MCPConfig
 
 func mcpConnect(serverName, url, token string) MCPConnect {
 	auth := "Bearer " + token
-	jsonCfg, _ := json.MarshalIndent(map[string]any{"mcpServers": map[string]any{"healthsync": map[string]any{
-		"type": "http", "url": url, "headers": map[string]string{"Authorization": auth}}}}, "", "  ")
+	httpServer := map[string]any{"healthsync": map[string]any{
+		"type": "http", "url": url, "headers": map[string]string{"Authorization": auth}}}
+	jsonCfg, _ := json.MarshalIndent(map[string]any{"mcpServers": httpServer}, "", "  ")
+	// VS Code's mcp.json keeps servers under "servers", not "mcpServers"
+	vscodeCfg, _ := json.MarshalIndent(map[string]any{"servers": httpServer}, "", "  ")
+	// mcp-remote reads the header from the environment: a space inside an argument can be
+	// split apart by some clients, so "Bearer <token>" goes in env, as its docs advise.
 	remote, _ := json.MarshalIndent(map[string]any{"mcpServers": map[string]any{"healthsync": map[string]any{
-		"command": "npx", "args": []string{"-y", "mcp-remote", url, "--allow-http", "--header", "Authorization:" + auth}}}}, "", "  ")
+		"command": "npx", "args": []string{"-y", "mcp-remote", url, "--allow-http", "--header", "Authorization:${AUTH_HEADER}"},
+		"env": map[string]string{"AUTH_HEADER": auth}}}}, "", "  ")
 	list := []MCPConfig{
 		{ID: "claude_code", Title: "Claude Code", Text: fmt.Sprintf("claude mcp add --transport http healthsync %s --header \"Authorization: %s\"", url, auth)},
-		{ID: "json", Title: "JSON (Cursor, VS Code, Windsurf, …)", Text: string(jsonCfg)},
+		{ID: "json", Title: "JSON (Cursor and other mcpServers clients)", Text: string(jsonCfg)},
+		{ID: "vscode", Title: "VS Code (.vscode/mcp.json)", Text: string(vscodeCfg)},
 		{ID: "stdio_bridge", Title: "Claude Desktop / stdio-only clients", Text: string(remote)},
 		{ID: "agent_prompt", Title: "Instructions for any AI agent", Text: fmt.Sprintf(`Connect to my personal health data through MCP (read-only).
 

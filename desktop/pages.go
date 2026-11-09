@@ -593,7 +593,8 @@ func (a *App) mcpPage(c *ui.Context, pal *palette) {
 			})
 			if a.mcp != nil {
 				ui.Text(c, a.t("现在复制，之后不会再显示这个令牌。", "Copy it now: this token won't be shown again.")).FontSize(12).TextColor(pal.accent)
-				titles := map[string]string{"claude_code": "Claude Code", "json": a.t("JSON 配置（Cursor、VS Code 等）", "JSON (Cursor, VS Code, …)"),
+				titles := map[string]string{"claude_code": "Claude Code", "json": a.t("JSON 配置（Cursor 等用 mcpServers 的客户端）", "JSON (Cursor and other mcpServers clients)"),
+						"vscode": a.t("VS Code（.vscode/mcp.json）", "VS Code (.vscode/mcp.json)"),
 					"stdio_bridge": a.t("Claude Desktop（桥接）", "Claude Desktop (bridge)"), "agent_prompt": a.t("给任何 AI agent 的说明", "Instructions for any agent")}
 				for i, cfg := range a.mcp.ConfigList {
 					a.copyBlock(c, pal, i, firstNonEmpty(titles[cfg.ID], cfg.Title), cfg.Text)

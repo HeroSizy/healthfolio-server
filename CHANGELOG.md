@@ -3,6 +3,12 @@
 Releases happen on their own: bump `version` in mygo.json, add its section here, push to
 main. The desktop app shows the section of a new version in its update window.
 
+## 0.0.12
+
+- AI assistant setup: VS Code gets its own snippet (it uses "servers", not "mcpServers"),
+  and the Claude Desktop snippet passes the token through an environment variable, as
+  mcp-remote advises, so it can't be split at the space.
+
 ## 0.0.11
 
 - A paired iPhone can read its checkup reports back (the report and every original file),

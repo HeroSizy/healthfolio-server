@@ -351,7 +351,7 @@ App 使用下面的接口。其它客户端也可以使用。
 | `POST /report` | 发送 `{"report":{"id","date","institution","title","items":[{name,originalName,key,value,unit,range,flag,location:{file,page,x,y,w,h}}],"originals":[{name,type,size,sha256}]},"folder":…,"files":[{"name","data"(base64)}]}`。`location` 是项目在原件里的位置：文件名、页码（从 0 开始）、按页面比例的框（左上角为原点）。服务器保存全部文件，`report.json` 按收到的原样保存（不认识的字段也保留）；文件的 SHA-256 和 `originals` 不一致时拒收。返回 `{"ok":true,"folder","stores","files":[{name,size,sha256}]}`。在控制面板里点报告、再点项目，就能在原件上看到框出的那一行。 |
 | `GET /stats` | 返回每种类型的记录数。 |
 | `POST /mcp` | MCP（Streamable HTTP，JSON 响应）。发送 Bearer 令牌。 |
-| `POST /mcp/tokens` | 发送设备的 Bearer 令牌和 `{"name":"Claude"}`。返回给 AI 助手的新只读令牌（scope 为 `mcp`，只能用于 `/mcp` 和 `/auth`，其它接口返回 `403` 和 `"reason":"read_only"`）和可以复制的配置：`{"url","token","transport","configs":{"claude_code","json","stdio_bridge","agent_prompt"},"config_list":[{"id","title","text"}]}`。你可以撤销这个令牌。AI 助手访问关闭时返回 `403`。 |
+| `POST /mcp/tokens` | 发送设备的 Bearer 令牌和 `{"name":"Claude"}`。返回给 AI 助手的新只读令牌（scope 为 `mcp`，只能用于 `/mcp` 和 `/auth`，其它接口返回 `403` 和 `"reason":"read_only"`）和可以复制的配置：`{"url","token","transport","configs":{"claude_code","json","vscode","stdio_bridge","agent_prompt"},"config_list":[{"id","title","text"}]}`。你可以撤销这个令牌。AI 助手访问关闭时返回 `403`。 |
 | `GET /skill.md` | 返回给 AI 助手的 HealthSync skill。 |
 | `PATCH /api/devices/{id}` | 控制面板用。发送 `{"name":"…"}` 来重命名设备。令牌不变。 |
 | `POST /api/mcp` | 控制面板用。发送 `{"enabled":true}` 或 `{"enabled":false}` 来打开或关闭 AI 助手访问。 |

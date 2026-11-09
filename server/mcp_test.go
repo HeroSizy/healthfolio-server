@@ -126,3 +126,15 @@ func TestMCPPromptsResourcesAndSwitch(t *testing.T) {
 		t.Fatalf("mcp back on: %d", code)
 	}
 }
+
+// VS Code gets its own "servers" config, and mcp-remote reads the header from env.
+func TestMCPConnectConfigs(t *testing.T) {
+	c := mcpConnect("Mac", "http://h:8787/mcp", "tok")
+	if !strings.Contains(c.Configs["vscode"], `"servers"`) || strings.Contains(c.Configs["vscode"], "mcpServers") {
+		t.Errorf("vscode: %s", c.Configs["vscode"])
+	}
+	b := c.Configs["stdio_bridge"]
+	if !strings.Contains(b, `"Authorization:${AUTH_HEADER}"`) || !strings.Contains(b, `"AUTH_HEADER": "Bearer tok"`) {
+		t.Errorf("bridge: %s", b)
+	}
+}
