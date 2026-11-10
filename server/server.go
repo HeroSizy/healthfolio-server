@@ -261,7 +261,7 @@ func (s *Server) admin(next http.HandlerFunc) http.HandlerFunc {
 			http.Error(w, "The dashboard is only available on the local network.", http.StatusForbidden)
 			return
 		}
-		local := isLoopback(ip)
+		local := thisComputer(r)
 		if !local && s.cfg.AdminPassword == "" && !s.cfg.DashboardNoPassword {
 			// Everyone on the Wi-Fi (guests too) or the tailnet could otherwise read all
 			// the health data and the shared token. This computer itself needs no password.
@@ -289,6 +289,38 @@ func (s *Server) admin(next http.HandlerFunc) http.HandlerFunc {
 func isLoopback(ip string) bool {
 	a, err := netip.ParseAddr(ip)
 	return err == nil && a.WithZone("").Unmap().IsLoopback()
+}
+
+// proxyHeaders are what reverse proxies and tunnels (nginx, Caddy, Tailscale Serve,
+// cloudflared, ngrok…) add to the requests they pass on.
+var proxyHeaders = []string{"X-Forwarded-For", "X-Forwarded-Host", "X-Forwarded-Proto", "X-Real-Ip", "Forwarded", "Via"}
+
+// thisComputer reports whether the request comes from a browser on this computer, straight
+// to the server: only that may skip the dashboard password and see the shared token.
+// A connection from 127.0.0.1 alone does not say so:
+//   - a reverse proxy on this computer connects from 127.0.0.1 for everyone it serves;
+//   - a web page elsewhere can point its own domain name at 127.0.0.1 (DNS rebinding) and
+//     then read the dashboard from the browser on this computer. Its requests carry that
+//     name in Host, so the address typed must be an IP address or localhost.
+func thisComputer(r *http.Request) bool {
+	if !isLoopback(clientIP(r)) {
+		return false
+	}
+	for _, h := range proxyHeaders {
+		if r.Header.Get(h) != "" {
+			return false
+		}
+	}
+	host := r.Host
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	host = strings.ToLower(strings.TrimSuffix(strings.Trim(host, "[]"), "."))
+	if host == "localhost" || strings.HasSuffix(host, ".localhost") {
+		return true
+	}
+	_, err := netip.ParseAddr(host)
+	return err == nil
 }
 
 // needPassword explains that the dashboard needs a password before other computers may
@@ -517,8 +549,11 @@ func (s *Server) handleReport(w http.ResponseWriter, r *http.Request) {
 	}
 	saved := []map[string]any{}
 	for _, f := range req.Files {
-		fn := filepath.Base(f.Name)
-		if fn == "." || fn == "/" || fn == "" || fn == "report.json" {
+		// The name alone, whichever slash the sender used. Names starting with a dot are
+		// not kept: "..", the temporary files of writeFileAtomic, and hidden files, which
+		// nothing here lists or serves.
+		fn := f.Name[strings.LastIndexAny(f.Name, `/\`)+1:]
+		if fn == "" || strings.HasPrefix(fn, ".") || fn == "report.json" {
 			continue
 		}
 		data, err := base64.StdEncoding.DecodeString(f.Data)
@@ -1060,7 +1095,7 @@ func (s *Server) apiDaily(w http.ResponseWriter, r *http.Request) {
 // apiToken shows the shared token, which can do anything a paired phone can: only on the
 // computer running the server.
 func (s *Server) apiToken(w http.ResponseWriter, r *http.Request) {
-	if !isLoopback(clientIP(r)) {
+	if !thisComputer(r) {
 		writeJSON(w, 403, map[string]any{"error": "the shared token is only shown on the computer running HealthSync", "reason": "local_only"})
 		return
 	}

@@ -173,6 +173,9 @@ Use the server on your home network.
 - The dashboard also accepts only these addresses. You can turn off this limit.
 - Only the computer that runs HealthSync can open the dashboard without a password. Other
   computers need the dashboard password (`HEALTHSYNC_DASHBOARD_NO_PASSWORD=1` turns this off).
+  "This computer" is a browser that opens `http://127.0.0.1:<port>` or `http://localhost:<port>`
+  directly. A request that comes through a reverse proxy or a tunnel on the same computer,
+  or that names another host, needs the password too.
 - Tokens for AI assistants are read-only: they cannot send data or make other tokens.
 - A pairing code has 6 digits. You can use it one time only. It is valid for 10 minutes.
   After 5 incorrect attempts, the code stops working.

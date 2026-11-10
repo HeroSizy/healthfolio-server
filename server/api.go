@@ -55,6 +55,7 @@ func Start(cfg *Config, onEvent func(model.LogEntry)) (*Instance, error) {
 	addr := net.JoinHostPort(cfg.Bind, fmt.Sprint(cfg.Port))
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
+		srv.mcp.db.Close()
 		db.Close()
 		return nil, err
 	}
@@ -85,6 +86,9 @@ func (in *Instance) Stop() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		_ = in.hs.Shutdown(ctx)
+		// the read-only connection of MCP too: the desktop app starts a new server each
+		// time the settings are saved, and each one left its connection open
+		in.srv.mcp.db.Close()
 		in.db.Close()
 	})
 }

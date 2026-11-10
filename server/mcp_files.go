@@ -52,6 +52,7 @@ func (m *MCP) callFiles(name string, a map[string]any) (any, bool, error) {
 		}
 		for _, r := range rows {
 			folder, _ := r["folder"].(string)
+			folder = localReportFolder(m.dir, folder)
 			files := []map[string]any{}
 			for _, n := range originalFiles(folder) {
 				if fi, err := os.Stat(filepath.Join(folder, n)); err == nil {
@@ -77,7 +78,7 @@ func (m *MCP) callFiles(name string, a map[string]any) (any, bool, error) {
 		if n != filepath.Base(n) || n == "report.json" || strings.HasPrefix(n, ".") {
 			return nil, true, fmt.Errorf("no file %q in this report", n)
 		}
-		p := filepath.Join(folder, n)
+		p := filepath.Join(localReportFolder(m.dir, folder), n)
 		fi, err := os.Stat(p)
 		if err != nil || fi.IsDir() {
 			return nil, true, fmt.Errorf("no file %q in this report; call list_checkup_reports", n)

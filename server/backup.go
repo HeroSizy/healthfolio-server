@@ -71,7 +71,11 @@ func writeFileAtomic(path string, data []byte) error {
 		os.Remove(tmp.Name())
 		return err
 	}
-	return os.Rename(tmp.Name(), path)
+	if err := os.Rename(tmp.Name(), path); err != nil {
+		os.Remove(tmp.Name())
+		return err
+	}
+	return nil
 }
 
 func (s *Server) chatsDir() string    { return filepath.Join(s.cfg.DataDir, "chats") }

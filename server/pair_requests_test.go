@@ -194,18 +194,40 @@ func anyStrings(v any) []string {
 
 func TestDashboardNeedsPasswordFromOtherComputers(t *testing.T) {
 	s, _ := newTestServer(t)
-	get := func(remote, path, pw string) int {
+	req := func(remote, host, path, pw string, hdr ...string) int {
 		r := httptest.NewRequest("GET", path, nil)
-		r.RemoteAddr = remote
+		r.RemoteAddr, r.Host = remote, host
 		if pw != "" {
 			r.SetBasicAuth("admin", pw)
+		}
+		for i := 0; i+1 < len(hdr); i += 2 {
+			r.Header.Set(hdr[i], hdr[i+1])
 		}
 		w := httptest.NewRecorder()
 		s.ServeHTTP(w, r)
 		return w.Code
 	}
-	if c := get("127.0.0.1:5000", "/api/overview", ""); c != 200 {
-		t.Fatalf("this computer: %d", c)
+	get := func(remote, path, pw string) int { return req(remote, "192.168.1.2:8787", path, pw) }
+	for _, host := range []string{"127.0.0.1:8787", "localhost:8787", "[::1]:8787", "localhost"} {
+		if c := req("127.0.0.1:5000", host, "/api/overview", ""); c != 200 {
+			t.Fatalf("this computer, at %s: %d", host, c)
+		}
+		if c := req("127.0.0.1:5000", host, "/api/token", ""); c != 200 {
+			t.Fatalf("shared token on this computer, at %s: %d", host, c)
+		}
+	}
+	// A page elsewhere that points its own name at 127.0.0.1 (DNS rebinding) is not this
+	// computer's user, and neither is whoever comes through a reverse proxy running here.
+	if c := req("127.0.0.1:5000", "evil.example:8787", "/api/overview", ""); c != 403 {
+		t.Fatalf("DNS rebinding read the dashboard: %d", c)
+	}
+	if c := req("127.0.0.1:5000", "evil.example:8787", "/api/token", ""); c != 403 {
+		t.Fatalf("DNS rebinding read the shared token: %d", c)
+	}
+	for _, h := range []string{"X-Forwarded-For", "X-Real-Ip", "Forwarded", "Via"} {
+		if c := req("127.0.0.1:5000", "127.0.0.1:8787", "/api/overview", "", h, "203.0.113.9"); c != 403 {
+			t.Fatalf("through a reverse proxy (%s), no password set: %d", h, c)
+		}
 	}
 	if c := get("192.168.1.9:5000", "/api/overview", ""); c != 403 {
 		t.Fatalf("LAN without a password set: %d", c)
@@ -219,6 +241,16 @@ func TestDashboardNeedsPasswordFromOtherComputers(t *testing.T) {
 	}
 	if c := get("192.168.1.9:5000", "/api/token", "pw"); c != 403 {
 		t.Fatalf("shared token shown to another computer: %d", c)
+	}
+	// with a password set, the proxy's visitors need it like everyone else
+	if c := req("127.0.0.1:5000", "health.example", "/api/overview", "", "X-Forwarded-For", "203.0.113.9"); c != 401 {
+		t.Fatalf("through a reverse proxy, no password given: %d", c)
+	}
+	if c := req("127.0.0.1:5000", "health.example", "/api/overview", "pw", "X-Forwarded-For", "203.0.113.9"); c != 200 {
+		t.Fatalf("through a reverse proxy with the password: %d", c)
+	}
+	if c := req("127.0.0.1:5000", "health.example", "/api/token", "pw", "X-Forwarded-For", "203.0.113.9"); c != 403 {
+		t.Fatalf("shared token shown through a reverse proxy: %d", c)
 	}
 	if c := get("8.8.8.8:5000", "/api/overview", "pw"); c != 403 {
 		t.Fatalf("internet: %d", c)

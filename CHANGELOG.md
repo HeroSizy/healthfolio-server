@@ -3,6 +3,21 @@
 Releases happen on their own: bump `version` in mygo.json, add its section here, push to
 main. The desktop app shows the section of a new version in its update window.
 
+## 0.0.13
+
+- Checkup reports keep every item when a report prints the same name twice (for example
+  white blood cells in the blood count and in the urine test). Before, the second one
+  replaced the first. Items lost this way come back by themselves from the report's
+  `report.json` the first time this version starts.
+- Checkup originals are found again after the data folder was moved or copied to another
+  computer.
+- The dashboard opens without a password only for a browser on this computer that goes
+  straight to `127.0.0.1` or `localhost`. Requests that come through a reverse proxy or a
+  tunnel on the same computer, or from a web page that points its own name at 127.0.0.1,
+  now need the password like any other computer, and never see the shared token.
+- Saving the settings in the desktop app no longer leaves a database connection open each
+  time, and the menu bar menu can't crash while the server restarts.
+
 ## 0.0.12
 
 - AI assistant setup: VS Code gets its own snippet (it uses "servers", not "mcpServers"),

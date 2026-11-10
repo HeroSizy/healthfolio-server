@@ -267,12 +267,13 @@ func (h *host) trayMenu() *mygo.Menu {
 		return e
 	}
 	status := t("服务器已停止", "Server stopped")
-	if b, _ := h.Backend(); b != nil {
-		status = t("运行中", "Running") + " · " + strings.TrimPrefix(h.inst.Cfg.BaseURL(), "http://")
-	}
+	// read once under the lock: saving the settings sets h.inst to nil for a moment
 	h.mu.Lock()
-	synced := h.synced
+	inst, synced := h.inst, h.synced
 	h.mu.Unlock()
+	if inst != nil {
+		status = t("运行中", "Running") + " · " + strings.TrimPrefix(inst.Cfg.BaseURL(), "http://")
+	}
 	last := t("本次运行还没有同步", "No sync since launch")
 	if !synced.IsZero() {
 		last = t("最近同步 ", "Last sync ") + synced.Format("15:04")

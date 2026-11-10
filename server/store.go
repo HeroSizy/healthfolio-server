@@ -1,12 +1,14 @@
 package server
 
 import (
+	"context"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -37,8 +39,7 @@ CREATE TABLE IF NOT EXISTS records (
     UNIQUE (type, start, "end", source, value));
 CREATE TABLE IF NOT EXISTS checkup (
     report_id TEXT NOT NULL, date TEXT NOT NULL, institution TEXT, name TEXT NOT NULL,
-    key TEXT, value TEXT, num REAL, unit TEXT, range TEXT, flag TEXT,
-    UNIQUE (report_id, name));
+    key TEXT, value TEXT, num REAL, unit TEXT, range TEXT, flag TEXT);
 
 -- added by healthsync-server
 CREATE TABLE IF NOT EXISTS sync_log (
@@ -96,6 +97,7 @@ func OpenDB(path string) (*DB, error) {
 		return nil, fmt.Errorf("migrate %s: %w", path, err)
 	}
 	d := &DB{sql: db, path: path, compacted: make(chan struct{})}
+	d.restoreReportItems()
 	go func() {
 		defer close(d.compacted)
 		d.compact()
@@ -177,6 +179,12 @@ func migrate(db *sql.DB) error {
 		{"loc_x", "REAL"}, {"loc_y", "REAL"}, {"loc_w", "REAL"}, {"loc_h", "REAL"}}); err != nil {
 		return err
 	}
+	if err := dropCheckupUnique(db); err != nil {
+		return err
+	}
+	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS checkup_report ON checkup(report_id)`); err != nil {
+		return err
+	}
 	if err := addColumns(db, "reports", [][2]string{{"title", "TEXT"}, {"originals", "TEXT"}}); err != nil {
 		return err
 	}
@@ -193,6 +201,56 @@ func migrate(db *sql.DB) error {
 	}
 	_, err := db.Exec(views)
 	return err
+}
+
+// checkupCols are the columns of checkup, in order.
+const checkupCols = `report_id, date, institution, name, key, value, num, unit, range, flag,
+	original_name, loc_file, loc_page, loc_x, loc_y, loc_w, loc_h`
+
+// dropCheckupUnique rebuilds a checkup table that still has UNIQUE (report_id, name).
+// A report can print the same name twice (white blood cells in the blood count and in the
+// urine test), and with that rule the second one replaced the first: the item was lost.
+// SQLite cannot drop such a rule, so the table is copied into one without it.
+func dropCheckupUnique(db *sql.DB) error {
+	var def string
+	if err := db.QueryRow(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'checkup'`).Scan(&def); err != nil {
+		return err
+	}
+	if !strings.Contains(strings.ToUpper(def), "UNIQUE") {
+		return nil
+	}
+	// One connection for all of it: the pragma and the transaction belong to a connection.
+	ctx := context.Background()
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	// legacy_alter_table: the rename must not fail because someone's own view names
+	// checkup, which does not exist between the DROP and the RENAME.
+	if _, err := conn.ExecContext(ctx, `PRAGMA legacy_alter_table = ON`); err != nil {
+		return err
+	}
+	defer conn.ExecContext(ctx, `PRAGMA legacy_alter_table = OFF`)
+	steps := []string{
+		`BEGIN IMMEDIATE`,
+		`DROP TABLE IF EXISTS checkup_rebuild`,
+		`CREATE TABLE checkup_rebuild (
+		    report_id TEXT NOT NULL, date TEXT NOT NULL, institution TEXT, name TEXT NOT NULL,
+		    key TEXT, value TEXT, num REAL, unit TEXT, range TEXT, flag TEXT,
+		    original_name TEXT, loc_file TEXT, loc_page INTEGER, loc_x REAL, loc_y REAL, loc_w REAL, loc_h REAL)`,
+		`INSERT INTO checkup_rebuild (` + checkupCols + `) SELECT ` + checkupCols + ` FROM checkup ORDER BY rowid`,
+		`DROP TABLE checkup`,
+		`ALTER TABLE checkup_rebuild RENAME TO checkup`,
+		`COMMIT`,
+	}
+	for _, q := range steps {
+		if _, err := conn.ExecContext(ctx, q); err != nil {
+			_, _ = conn.ExecContext(ctx, `ROLLBACK`)
+			return fmt.Errorf("rebuilding checkup: %w", err)
+		}
+	}
+	return nil
 }
 
 // addColumns adds the columns table is missing.
@@ -382,28 +440,8 @@ func (d *DB) InsertReport(rep Report, folderName, folder string) (int, error) {
 		return 0, err
 	}
 	defer tx.Rollback()
-	// The same report sent again (from another device, or after editing) replaces the old
-	// one: the app derives the id from the original file's hash, so drop the old items first
-	// and items that were renamed or removed don't linger.
-	if _, err := tx.Exec(`DELETE FROM checkup WHERE report_id = ?`, id); err != nil {
+	if err := replaceItems(tx, id, date, rep); err != nil {
 		return 0, err
-	}
-	for _, it := range rep.Items {
-		v := str(it.Value)
-		var num any
-		if f, ok := asNumber(v); ok {
-			num = f
-		}
-		var lf, lp, lx, ly, lw, lh any
-		if l := it.Location; l != nil {
-			lf, lp, lx, ly, lw, lh = l.File, l.Page, l.X, l.Y, l.W, l.H
-		}
-		if _, err := tx.Exec(`INSERT OR REPLACE INTO checkup (report_id, date, institution, name, key, value, num, unit, range, flag,
-				original_name, loc_file, loc_page, loc_x, loc_y, loc_w, loc_h) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-			id, date, rep.Institution, it.Name, it.Key, v, num, it.Unit, it.Range, it.Flag,
-			nullable(it.OriginalName), lf, lp, lx, ly, lw, lh); err != nil {
-			return 0, err
-		}
 	}
 	var originals any
 	if len(rep.Originals) > 0 {
@@ -415,6 +453,106 @@ func (d *DB) InsertReport(rep Report, folderName, folder string) (int, error) {
 		return 0, err
 	}
 	return len(rep.Items), tx.Commit()
+}
+
+// replaceItems stores the items of report id in place of those it had. The same report
+// sent again (from another device, or after editing) replaces the old one: the app derives
+// the id from the original file's hash, so the old items go first and items that were
+// renamed or removed don't linger. Two items may have the same name.
+func replaceItems(tx *sql.Tx, id, date string, rep Report) error {
+	if _, err := tx.Exec(`DELETE FROM checkup WHERE report_id = ?`, id); err != nil {
+		return err
+	}
+	for _, it := range rep.Items {
+		v := str(it.Value)
+		var num any
+		if f, ok := asNumber(v); ok {
+			num = f
+		}
+		var lf, lp, lx, ly, lw, lh any
+		if l := it.Location; l != nil {
+			lf, lp, lx, ly, lw, lh = l.File, l.Page, l.X, l.Y, l.W, l.H
+		}
+		if _, err := tx.Exec(`INSERT INTO checkup (`+checkupCols+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			id, date, rep.Institution, it.Name, it.Key, v, num, it.Unit, it.Range, it.Flag,
+			nullable(it.OriginalName), lf, lp, lx, ly, lw, lh); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// restoreReportItems brings back the items older versions lost to UNIQUE (report_id, name)
+// (see dropCheckupUnique): a report with fewer items in the database than the app sent gets
+// them again from its report.json, which always kept all of them.
+func (d *DB) restoreReportItems() {
+	rows, err := d.sql.Query(`SELECT id, COALESCE(date,''), COALESCE(folder,'') FROM reports r
+		WHERE COALESCE(folder,'') != '' AND COALESCE(items,0) > (SELECT COUNT(*) FROM checkup c WHERE c.report_id = r.id)`)
+	if err != nil {
+		return
+	}
+	type short struct{ id, date, folder string }
+	var todo []short
+	for rows.Next() {
+		var s short
+		if rows.Scan(&s.id, &s.date, &s.folder) == nil {
+			todo = append(todo, s)
+		}
+	}
+	rows.Close()
+	for _, s := range todo {
+		b, err := os.ReadFile(filepath.Join(d.reportFolder(s.folder), "report.json"))
+		if err != nil {
+			continue
+		}
+		var rep Report
+		if json.Unmarshal(b, &rep) != nil || (rep.ID != "" && rep.ID != s.id) {
+			continue
+		}
+		tx, err := d.sql.Begin()
+		if err != nil {
+			return
+		}
+		if err := replaceItems(tx, s.id, s.date, rep); err != nil {
+			tx.Rollback()
+			logf("restoring the items of report %s: %v", s.id, err)
+			continue
+		}
+		// what report.json holds is now what the database holds: don't look again
+		if _, err := tx.Exec(`UPDATE reports SET items = ? WHERE id = ?`, len(rep.Items), s.id); err != nil {
+			tx.Rollback()
+			continue
+		}
+		if tx.Commit() == nil {
+			logf("restored the items of report %s from its report.json (%d items)", s.id, len(rep.Items))
+		}
+	}
+}
+
+// reportFolder is where a report's folder is now. The database keeps the full path from
+// the day the report arrived; when the data folder was moved since (or copied to another
+// computer), the folder is in reports/ next to the database.
+func (d *DB) reportFolder(folder string) string {
+	return localReportFolder(filepath.Dir(d.path), folder)
+}
+
+// localReportFolder is reportFolder for the data folder dataDir.
+func localReportFolder(dataDir, folder string) string {
+	if folder == "" {
+		return ""
+	}
+	if _, err := os.Stat(folder); err == nil {
+		return folder
+	}
+	name := folder[strings.LastIndexAny(folder, `/\`)+1:]
+	if name == "" || name == "." || name == ".." {
+		return folder
+	}
+	moved := filepath.Join(dataDir, "reports", name)
+	if _, err := os.Stat(moved); err == nil {
+		return moved
+	}
+	return folder
 }
 
 type TypeStat = model.TypeStat
@@ -748,7 +886,7 @@ func (d *DB) Reports() ([]ReportRow, error) {
 		if err := rows.Scan(&r.ID, &r.Date, &r.Institution, &r.Items, &r.Flagged, &r.Received, &r.Title, &folder); err != nil {
 			return nil, err
 		}
-		r.Files = len(originalFiles(folder))
+		r.Files = len(originalFiles(d.reportFolder(folder)))
 		out = append(out, r)
 	}
 	return out, rows.Err()
@@ -773,6 +911,7 @@ func (d *DB) ReportFolders() ([]ReportFolder, error) {
 		if err := rows.Scan(&f.ID, &f.Date, &f.Folder, &f.Received); err != nil {
 			return nil, err
 		}
+		f.Folder = d.reportFolder(f.Folder)
 		out = append(out, f)
 	}
 	return out, rows.Err()
@@ -803,6 +942,7 @@ func (d *DB) ReportDetail(id string) (rep Report, folder string, err error) {
 	if err != nil {
 		return rep, "", err
 	}
+	folder = d.reportFolder(folder)
 	rep.Title = title.String
 	if originals.Valid {
 		_ = json.Unmarshal([]byte(originals.String), &rep.Originals)
