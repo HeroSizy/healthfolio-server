@@ -51,8 +51,7 @@ SQLite 数据库里。它是一个二进制文件，或一个 Docker 镜像。�
 
 1. 打开 [Releases](../../releases)。
 2. 下载适合你系统的文件：`.dmg`（macOS）、`-setup.exe`（Windows）、`.deb` 或 `.tar.gz`（Linux）。
-3. 安装 App。
-4. 在 macOS 上，第一次打开时右键点击 App，选择 **打开**。macOS 版本还没有经过公证。
+3. 安装 App。macOS 版本用 Developer ID 签名，并经过 Apple 公证，可以像其它 App 一样直接打开。
 
 ### 从源码构建 App
 

@@ -3,6 +3,11 @@
 Releases happen on their own: bump `version` in mygo.json, add its section here, push to
 main. The desktop app shows the section of a new version in its update window.
 
+## 0.0.14
+
+- The macOS app is signed with a Developer ID and notarized by Apple: it opens with a
+  double-click, without right-click › Open or a trip to Privacy & Security.
+
 ## 0.0.13
 
 - Checkup reports keep every item when a report prints the same name twice (for example

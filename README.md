@@ -58,9 +58,8 @@ It does not use a cloud service. It does not need an account.
 1. Go to [Releases](../../releases).
 2. Download the file for your system: `.dmg` (macOS), `-setup.exe` (Windows), or `.deb` or
    `.tar.gz` (Linux).
-3. Install the app.
-4. On macOS, open the app the first time with right-click › **Open**. The macOS build is not
-   notarized yet.
+3. Install the app. The macOS app is signed with a Developer ID and notarized by Apple, so it
+   opens like any other app.
 
 ### Build the app from source
 
