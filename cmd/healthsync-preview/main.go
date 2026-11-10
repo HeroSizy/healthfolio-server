@@ -28,7 +28,7 @@ func main() {
 	frag := fragment()
 	app := desktop.New(s, !strings.Contains(frag, "en"))
 	mygo.App.WhenReady(func() {
-		win = mygo.NewWindow(mygo.WindowOptions{Title: "HealthSync", Width: 1080, Height: 720, Content: ui.View(app.View)})
+		win = mygo.NewWindow(mygo.WindowOptions{Title: "Healthfolio", Width: 1080, Height: 720, Content: ui.View(app.View)})
 		if strings.Contains(frag, "welcome") {
 			app.ShowOnboarding()
 			return

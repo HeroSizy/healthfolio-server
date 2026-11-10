@@ -41,7 +41,7 @@ func (s *Sample) Overview() model.Overview {
 	act[11].Added, act[11].Fails = 0, 2
 	last := model.LogEntry{Time: now.Add(-3 * time.Minute).Format(time.RFC3339), Kind: "ingest", Device: "iPhone", OK: true, Received: 412, Added: 388}
 	return model.Overview{
-		Name: "Mac mini", Version: "0.2.0", Protocol: 2, OS: "mac", BaseURL: "http://192.168.1.10:8787", TailscaleURL: "http://100.101.102.103:8787", MCPURL: "http://192.168.1.10:8787/mcp",
+		Name: "Home server", Version: "0.0.15", Protocol: 2, OS: "mac", BaseURL: "http://192.168.1.10:8787", TailscaleURL: "http://100.101.102.103:8787", MCPURL: "http://192.168.1.10:8787/mcp",
 		DataDir: "~/Library/Application Support/HealthSync", Outputs: []model.Output{{Kind: "sqlite", Where: "health.db"}},
 		Stats: model.Stats{Total: 184_327, Types: []model.TypeStat{
 			{Type: "HKQuantityTypeIdentifierHeartRate", Count: 96_210}, {Type: "HKQuantityTypeIdentifierActiveEnergyBurned", Count: 41_088},
@@ -148,7 +148,7 @@ func (s *Sample) NewMCPToken(name string) (model.MCPConnect, error) {
   }
 }`},
 	}
-	return model.MCPConnect{Name: "Mac mini", Token: tok, URL: "http://192.168.1.10:8787/mcp", ConfigList: cfgs}, nil
+	return model.MCPConnect{Name: "Home server", Token: tok, URL: "http://192.168.1.10:8787/mcp", ConfigList: cfgs}, nil
 }
 func (s *Sample) DashboardURL() string { return "http://127.0.0.1:8787/" }
 
