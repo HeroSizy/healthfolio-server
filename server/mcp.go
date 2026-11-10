@@ -138,9 +138,9 @@ func (m *MCP) Handle(raw []byte) *rpcResp {
 		resp.Result = map[string]any{
 			"protocolVersion": v,
 			"capabilities":    map[string]any{"tools": map[string]any{}, "prompts": map[string]any{}, "resources": map[string]any{}},
-			"serverInfo":      map[string]any{"name": "healthsync", "title": "HealthSync", "version": version},
+			"serverInfo":      map[string]any{"name": "healthsync", "title": "Healthfolio", "version": version},
 			"instructions": "Personal Apple Health data synced from the user's iPhone, plus medical checkup results with their original PDFs and photos, " +
-				"and the conversations and settings of the HealthSync iPhone app. Start with list_data_types (or list_checkup_reports for checkups). Times are ISO 8601 with the phone's time zone. This is the user's private health data: " +
+				"and the conversations and settings of the Healthfolio iPhone app. Start with list_data_types (or list_checkup_reports for checkups). Times are ISO 8601 with the phone's time zone. This is the user's private health data: " +
 				"answer their questions, don't speculate beyond what the data shows, and suggest a doctor for medical decisions.",
 		}
 	case "ping":
@@ -437,7 +437,7 @@ func mcpConnect(serverName, url, token string) MCPConnect {
 		{ID: "stdio_bridge", Title: "Claude Desktop / stdio-only clients", Text: string(remote)},
 		{ID: "agent_prompt", Title: "Instructions for any AI agent", Text: fmt.Sprintf(`Connect to my personal health data through MCP (read-only).
 
-- Server: HealthSync on %s
+- Server: Healthfolio on %s
 - Transport: Streamable HTTP, JSON-RPC 2.0, POST %s
 - Auth header: Authorization: %s
 - Tools: list_data_types, daily_summary, get_records, get_checkups, list_checkup_reports, get_report_file, list_ai_chats, get_ai_chat, get_app_settings, query_sql

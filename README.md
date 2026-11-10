@@ -1,8 +1,10 @@
-# healthsync-server
+# Healthfolio Server
 
 English | [简体中文](README.zh-CN.md)
 
-healthsync-server receives Apple Health data from the **HealthSync** iPhone app. It keeps
+Healthfolio Server receives Apple Health data from the **Healthfolio** iPhone app (formerly
+HealthSync). Its command-line program, data folder and Docker image keep the name
+`healthsync-server`, so existing setups go on working. It keeps
 the data in a SQLite database on your computer. It is one binary file or one Docker image.
 It does not use a cloud service. It does not need an account.
 
@@ -33,7 +35,7 @@ It does not use a cloud service. It does not need an account.
 
 ## Two ways to run the server
 
-- **HealthSync, the desktop app** (macOS, Windows, Linux). The app has a menu bar icon and a
+- **Healthfolio, the desktop app** (macOS, Windows, Linux). The app has a menu bar icon and a
   native window. [MyGo](https://github.com/egoist/mygo) draws the window on the GPU. The app
   does not use a webview or Electron. Use the app to:
   - Pair an iPhone with a QR code.
@@ -170,7 +172,7 @@ Use the server on your home network.
 - Pairing without a code shows a 4-digit confirmation code on the phone and on the
   computer. Each address can ask 6 times in 10 minutes, and at most 3 requests wait at a time.
 - The dashboard also accepts only these addresses. You can turn off this limit.
-- Only the computer that runs HealthSync can open the dashboard without a password. Other
+- Only the computer that runs Healthfolio can open the dashboard without a password. Other
   computers need the dashboard password (`HEALTHSYNC_DASHBOARD_NO_PASSWORD=1` turns this off).
   "This computer" is a browser that opens `http://127.0.0.1:<port>` or `http://localhost:<port>`
   directly. A request that comes through a reverse proxy or a tunnel on the same computer,
@@ -321,7 +323,7 @@ The server also gives these resources:
 - `healthsync://checkups/latest`: the most recent checkup report.
 - `healthsync://summary/7d`: the main metrics for the last 7 days.
 - `healthsync://daily/{type}`: the last 30 days of one data type.
-- `healthsync://skill`: the HealthSync skill.
+- `healthsync://skill`: the Healthfolio skill.
 
 ### Skill
 
@@ -378,7 +380,7 @@ The app uses these endpoints. Other clients can use them too.
 | `GET /stats` | Returns the number of records for each type. |
 | `POST /mcp` | MCP (Streamable HTTP, JSON responses). Send a Bearer token. |
 | `POST /mcp/tokens` | Send a Bearer device token and `{"name":"Claude"}`. Returns a new read-only token (scope `mcp`) for an AI agent. That token works only for `/mcp` and `/auth`: other endpoints return `403` with `"reason":"read_only"`. Also returns and configurations to copy: `{"url","token","transport","configs":{"claude_code","json","vscode","stdio_bridge","agent_prompt"},"config_list":[{"id","title","text"}]}`. You can revoke the token. Returns `403` when AI assistant access is off. |
-| `GET /skill.md` | Returns the HealthSync skill for AI assistants. |
+| `GET /skill.md` | Returns the Healthfolio skill for AI assistants. |
 | `PATCH /api/devices/{id}` | Dashboard. Send `{"name":"…"}` to rename a device. The token does not change. |
 | `POST /api/mcp` | Dashboard. Send `{"enabled":true}` or `{"enabled":false}` to turn AI assistant access on or off. |
 

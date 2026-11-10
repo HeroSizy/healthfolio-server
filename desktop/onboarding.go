@@ -92,11 +92,11 @@ func (a *App) obButtons(c *ui.Context, quiet string, onQuiet func(), main string
 
 func (a *App) obWelcome(c *ui.Context, pal *palette) {
 	ui.Image(c, appIcon).Size(56, 56).Radius(14).Shadow(0, 4, 14, 0, pal.accent.Alpha(0.3))
-	a.obTitle(c, pal, a.t("欢迎使用 HealthSync", "Welcome to HealthSync"),
+	a.obTitle(c, pal, a.t("欢迎使用 Healthfolio", "Welcome to Healthfolio"),
 		a.t("把 iPhone 上的健康数据同步到这台电脑。", "Sync the health data on your iPhone to this computer."))
 	ui.Column(c).Gap(12).Children(func() {
 		for _, p := range [][3]string{
-			{"⇄", "iPhone 上的「健康同步」App 把数据发到这里，在家时走局域网，不在家时可以走 Tailscale。", "The HealthSync app on your iPhone sends data here: over your home network, or over Tailscale when you're away."},
+			{"⇄", "iPhone 上的「健康册」App 把数据发到这里，在家时走局域网，不在家时可以走 Tailscale。", "The Healthfolio app on your iPhone sends data here: over your home network, or over Tailscale when you're away."},
 			{"⌂", "数据只存在这台电脑上的 SQLite 数据库里，不经过任何云服务。", "Data stays in a SQLite database on this computer. No cloud service in between."},
 			{"✦", "需要时可以让 AI 助手（Claude 等）只读地查看你的数据。", "If you want, AI assistants such as Claude can read your data, read-only."},
 		} {
@@ -175,8 +175,8 @@ func (a *App) obPair(c *ui.Context, pal *palette) {
 		return
 	}
 	a.obTitle(c, pal, a.t("配对 iPhone", "Pair your iPhone"),
-		a.t("在 iPhone 上打开「健康同步」App，用相机或 App 里的「添加目的地 › 本地服务器」扫这个二维码。",
-			"Open the HealthSync app on your iPhone and scan this code with the camera, or in the app: Add destination › Local server."))
+		a.t("在 iPhone 上打开「健康册」App，用相机或 App 里的「添加目的地 › 本地服务器」扫这个二维码。",
+			"Open the Healthfolio app on your iPhone and scan this code with the camera, or in the app: Add destination › Local server."))
 	for _, p := range a.pending {
 		a.pendingCard(c, pal, b, p)
 	}
@@ -212,7 +212,7 @@ func (a *App) obPair(c *ui.Context, pal *palette) {
 }
 
 func (a *App) obDone(c *ui.Context, pal *palette) {
-	a.obTitle(c, pal, a.t("准备好了", "All set"), a.t("HealthSync 会在后台一直运行。", "HealthSync keeps running in the background."))
+	a.obTitle(c, pal, a.t("准备好了", "All set"), a.t("Healthfolio 会在后台一直运行。", "Healthfolio keeps running in the background."))
 	ui.Column(c).Gap(12).Children(func() {
 		for _, p := range [][2]string{
 			{"关掉窗口后，服务器还在菜单栏里运行，iPhone 随时能同步。", "Closing the window keeps the server running in the menu bar, so the iPhone can sync any time."},
@@ -226,7 +226,7 @@ func (a *App) obDone(c *ui.Context, pal *palette) {
 			})
 		}
 	})
-	a.obButtons(c, "", nil, a.t("开始使用", "Open HealthSync"), false, func() {
+	a.obButtons(c, "", nil, a.t("开始使用", "Open Healthfolio"), false, func() {
 		a.ob.show = false
 		a.page = "overview"
 		a.Refresh()

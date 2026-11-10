@@ -3,6 +3,13 @@
 Releases happen on their own: bump `version` in mygo.json, add its section here, push to
 main. The desktop app shows the section of a new version in its update window.
 
+## 0.0.15
+
+- HealthSync is now **Healthfolio**, with a new icon, to match the iPhone app (健康册). Your
+  data, pairing, settings and AI assistant setups stay as they are: the data folder, the
+  `healthsync-server` command and its Docker image keep their names.
+- The project moved to github.com/HeroSizy/healthfolio-server; the old address redirects.
+
 ## 0.0.14
 
 - The macOS app is signed with a Developer ID and notarized by Apple: it opens with a

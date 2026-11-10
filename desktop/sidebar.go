@@ -59,7 +59,7 @@ func (a *App) sidebar(c *ui.Context, pal *palette, bar ui.TitleBar) {
 		ui.Row(c).AlignItems(ui.Center).Gap(10).Padding(4, 6, 14, 6).Children(func() {
 			ui.Image(c, appIcon).Size(30, 30).Radius(8).Shadow(0, 2, 6, 0, pal.accent.Alpha(0.3))
 			ui.Column(c).Gap(0).MinWidth(0).Children(func() {
-				ui.Text(c, "HealthSync").FontSize(14).FontWeight(650).TextColor(pal.text)
+				ui.Text(c, "Healthfolio").FontSize(14).FontWeight(650).TextColor(pal.text)
 				name := a.ov.Name
 				if name == "" {
 					name = a.t("本地服务器", "Local server")

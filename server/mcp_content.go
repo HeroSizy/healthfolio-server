@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-const mcpOffMessage = "AI assistant access (MCP) is turned off in HealthSync. Turn it on in the app or the dashboard."
+const mcpOffMessage = "AI assistant access (MCP) is turned off in Healthfolio. Turn it on in the app or the dashboard."
 
 //go:embed skill/SKILL.md
 var skillMD string
@@ -34,7 +34,7 @@ type prompt struct {
 	text        func(a map[string]string) string
 }
 
-const promptRules = "\n\nUse the HealthSync tools to get the data; do not guess numbers. Give dates and units. " +
+const promptRules = "\n\nUse the Healthfolio tools to get the data; do not guess numbers. Give dates and units. " +
 	"Say when data is missing or sparse. This is not medical advice: suggest a doctor for anything that needs one. " +
 	"Answer in the language the user writes in."
 
@@ -120,7 +120,7 @@ var mcpResources = []resource{
 		Description: "All items of the most recent checkup report."},
 	{URI: "healthsync://summary/7d", Name: "summary-7d", Title: "Last 7 days", MimeType: "application/json",
 		Description: "Daily totals and averages of the main metrics for the last 7 days."},
-	{URI: "healthsync://skill", Name: "skill", Title: "HealthSync skill", MimeType: "text/markdown",
+	{URI: "healthsync://skill", Name: "skill", Title: "Healthfolio skill", MimeType: "text/markdown",
 		Description: "How to answer questions with this server: the tools, the views and good queries."},
 }
 

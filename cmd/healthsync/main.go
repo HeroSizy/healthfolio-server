@@ -61,7 +61,7 @@ func main() {
 	// Self-updates from the GitHub releases (mygo.json "updates"), in a native window.
 	mygo.Use(native.Plugin)
 	updater.OnChange(h.app.Refresh)
-	mygo.App.SetName("HealthSync")
+	mygo.App.SetName("Healthfolio")
 	mygo.App.OnBeforeQuit(func(*mygo.QuitEvent) { h.quitting = true })
 	mygo.App.WhenReady(h.ready)
 	if err := mygo.App.Run(); err != nil {
@@ -193,7 +193,7 @@ func (h *host) onEvent(e model.LogEntry) {
 		h.updateTray()
 		if notify && e.Added > 0 {
 			zh := isChinese()
-			title := "HealthSync"
+			title := "Healthfolio"
 			body := fmt.Sprintf("Received %d new records from %s", e.Added, e.Device)
 			if zh {
 				body = fmt.Sprintf("收到 %s 的 %d 条新记录", e.Device, e.Added)
@@ -209,7 +209,7 @@ func (h *host) ready() {
 	if runtime.GOOS == "darwin" {
 		// The HealthSync menu in the menu bar, with "Check for Updates…" after About.
 		mygo.App.SetMenu(mygo.NewMenu([]*mygo.MenuItem{
-			{Label: "HealthSync", Submenu: []*mygo.MenuItem{
+			{Label: "Healthfolio", Submenu: []*mygo.MenuItem{
 				{Role: mygo.RoleAbout},
 				updater.MenuItem(),
 				mygo.Separator(),
@@ -226,7 +226,7 @@ func (h *host) ready() {
 		}))
 	}
 	h.win = mygo.NewWindow(mygo.WindowOptions{
-		Title: "HealthSync", Width: 1040, Height: 700, MinWidth: 760, MinHeight: 520,
+		Title: "Healthfolio", Width: 1040, Height: 700, MinWidth: 760, MinHeight: 520,
 		TitleBarStyle: mygo.TitleBarHidden, Content: ui.View(h.app.View),
 	})
 	h.win.OnClose(func(e *mygo.CloseEvent) {
@@ -237,7 +237,7 @@ func (h *host) ready() {
 		}
 	})
 	var err error
-	h.tray, err = mygo.NewTray(mygo.TrayOptions{ID: "healthsync", Icon: trayIcon(), IconIsTemplate: runtime.GOOS == "darwin", ToolTip: "HealthSync"})
+	h.tray, err = mygo.NewTray(mygo.TrayOptions{ID: "healthsync", Icon: trayIcon(), IconIsTemplate: runtime.GOOS == "darwin", ToolTip: "Healthfolio"})
 	if err != nil {
 		log.Printf("tray: %v", err)
 	} else {
@@ -285,7 +285,7 @@ func (h *host) trayMenu() *mygo.Menu {
 		{Label: status, Disabled: true},
 		{Label: last, Disabled: true},
 		mygo.Separator(),
-		{Label: t("打开 HealthSync", "Open HealthSync"), Click: open("overview")},
+		{Label: t("打开 Healthfolio", "Open Healthfolio"), Click: open("overview")},
 		{Label: t("配对新的 iPhone…", "Pair a New iPhone…"), Click: open("pair")},
 		{Label: t("连接 AI 助手…", "Connect an AI Assistant…"), Click: open("mcp")},
 		{Label: t("在浏览器打开控制面板", "Open Web Dashboard"), Click: func(*mygo.MenuItem, *mygo.Window) {
@@ -321,7 +321,7 @@ func (h *host) updateTray() {
 	if h.tray == nil {
 		return
 	}
-	tip := "HealthSync"
+	tip := "Healthfolio"
 	if b, why := h.Backend(); b == nil {
 		tip += " — " + why
 	}

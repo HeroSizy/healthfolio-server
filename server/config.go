@@ -176,7 +176,7 @@ func machineName() string {
 	h, _ := os.Hostname()
 	h, _, _ = strings.Cut(h, ".")
 	if h == "" {
-		h = "HealthSync"
+		h = "Healthfolio"
 	}
 	return h
 }

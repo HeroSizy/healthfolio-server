@@ -381,7 +381,7 @@ func (a *App) pairPage(c *ui.Context, pal *palette) {
 			ui.Row(c).Gap(24).AlignItems(ui.Center).Padding(18).Radius(14).Background(pal.inset).Children(func() {
 				a.qrBox(c, pal, b)
 				ui.Column(c).Grow(1).MinWidth(0).Gap(10).Children(func() {
-					ui.Text(c, a.t("和「健康同步」App 配对", "Pair with the HealthSync app")).FontSize(16).FontWeight(650)
+					ui.Text(c, a.t("和「健康册」App 配对", "Pair with the Healthfolio app")).FontSize(16).FontWeight(650)
 					for i, s := range [][2]string{
 						{"点「生成配对码」，这里会出现一次性二维码。", "Click “New pairing code” to show a one-time QR code."},
 						{"用 iPhone 相机扫码，或在 App → 添加目的地 → 本地服务器 里扫。", "Scan it with the iPhone camera, or in the app: Add destination → Local server."},

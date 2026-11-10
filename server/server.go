@@ -336,17 +336,17 @@ func (s *Server) needPassword(w http.ResponseWriter, r *http.Request) {
 }
 
 const needPasswordPage = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>HealthSync</title><style>
+<title>Healthfolio</title><style>
 :root{color-scheme:light dark}body{font:15px/1.6 -apple-system,system-ui,sans-serif;max-width:560px;margin:12vh auto;padding:0 20px}
 h1{font-size:20px}code{background:rgba(127,127,127,.15);padding:1px 5px;border-radius:4px}p{opacity:.85}</style></head><body>
 <h1>先给面板设个密码 · Set a dashboard password first</h1>
 <p>面板里有全部健康数据。为了不让同一 Wi‑Fi 或 Tailscale 里的其他人看到，从别的电脑打开面板前需要先设密码：</p>
-<ul><li>桌面版 HealthSync：在运行它的电脑上打开「设置 › 网页面板密码」。</li>
+<ul><li>桌面版 Healthfolio：在运行它的电脑上打开「设置 › 网页面板密码」。</li>
 <li>服务器版：设置环境变量 <code>HEALTHSYNC_ADMIN_PASSWORD</code>（或 <code>-admin-password</code>）后重启。</li></ul>
-<p>在运行 HealthSync 的这台电脑上用 <code>http://127.0.0.1</code> 打开不需要密码。</p>
+<p>在运行 Healthfolio 的这台电脑上用 <code>http://127.0.0.1</code> 打开不需要密码。</p>
 <hr><p>The dashboard shows all of your health data, so opening it from another computer needs a password.
 Desktop app: Settings › Dashboard password, on the computer running it. Server: set <code>HEALTHSYNC_ADMIN_PASSWORD</code> and restart.
-On the computer running HealthSync, <code>http://127.0.0.1</code> works without one.</p></body></html>`
+On the computer running Healthfolio, <code>http://127.0.0.1</code> works without one.</p></body></html>`
 
 // ---------------------------------------------------------------- app API
 
@@ -1096,7 +1096,7 @@ func (s *Server) apiDaily(w http.ResponseWriter, r *http.Request) {
 // computer running the server.
 func (s *Server) apiToken(w http.ResponseWriter, r *http.Request) {
 	if !thisComputer(r) {
-		writeJSON(w, 403, map[string]any{"error": "the shared token is only shown on the computer running HealthSync", "reason": "local_only"})
+		writeJSON(w, 403, map[string]any{"error": "the shared token is only shown on the computer running Healthfolio", "reason": "local_only"})
 		return
 	}
 	writeJSON(w, 200, map[string]any{"token": s.token})

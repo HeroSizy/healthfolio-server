@@ -28,13 +28,13 @@ var mcpFileTools = []tool{
 			"name":      prop("string", "The file name, from list_checkup_reports"),
 		}, "report_id", "name"), Annotations: readOnly},
 	{Name: "list_ai_chats", Title: "AI conversations",
-		Description: "Lists the conversations the user had with the AI assistant in the HealthSync iPhone app (backed up to this computer): id, title, last update, size. Read one with get_ai_chat.",
+		Description: "Lists the conversations the user had with the AI assistant in the Healthfolio iPhone app (backed up to this computer): id, title, last update, size. Read one with get_ai_chat.",
 		InputSchema: obj(map[string]any{}), Annotations: readOnly},
 	{Name: "get_ai_chat", Title: "One AI conversation",
-		Description: "Returns one conversation from the HealthSync iPhone app, as the app saved it.",
+		Description: "Returns one conversation from the Healthfolio iPhone app, as the app saved it.",
 		InputSchema: obj(map[string]any{"id": prop("string", "The conversation id, from list_ai_chats")}, "id"), Annotations: readOnly},
 	{Name: "get_app_settings", Title: "iPhone app settings",
-		Description: "Returns the HealthSync iPhone app's settings as last backed up (never keys or passwords): which data it syncs, its destinations, its AI provider, and so on.",
+		Description: "Returns the Healthfolio iPhone app's settings as last backed up (never keys or passwords): which data it syncs, its destinations, its AI provider, and so on.",
 		InputSchema: obj(map[string]any{}), Annotations: readOnly},
 }
 

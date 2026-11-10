@@ -1,11 +1,11 @@
 ---
 name: healthsync
-description: Answer questions about the user's Apple Health data and medical checkups with the HealthSync MCP server (steps, heart rate, HRV, sleep, workouts, weight, lab results). Use when the user asks about their health data, trends, sleep, workouts or checkup reports.
+description: Answer questions about the user's Apple Health data and medical checkups with the Healthfolio MCP server (steps, heart rate, HRV, sleep, workouts, weight, lab results). Use when the user asks about their health data, trends, sleep, workouts or checkup reports.
 ---
 
-# HealthSync
+# Healthfolio
 
-The `healthsync` MCP server gives read-only access to the user's Apple Health data and
+The `healthsync` MCP server (the Healthfolio server, still named `healthsync` in configurations) gives read-only access to the user's Apple Health data and
 checkup reports. The data comes from the user's iPhone and stays on their own computer.
 
 ## Rules
@@ -79,4 +79,4 @@ The server also has prompts (`weekly_review`, `checkup_review`, `sleep_analysis`
 ## Turned off
 
 If a call fails with "turned off", the user has turned off AI assistant access in
-HealthSync. Tell the user to turn it on in the HealthSync app or dashboard.
+Healthfolio. Tell the user to turn it on in the Healthfolio app or dashboard.

@@ -54,7 +54,7 @@ jobs:
           git tag "$TAG" "$GITHUB_SHA"
           git push origin "$TAG"
           awk -v v="$V" '/^## /{p = ($0 ~ "^## \\[?" v "\\]?([ ]|$)")} p' CHANGELOG.md | tail -n +2 > notes.md
-          gh release create "$TAG" --draft --verify-tag --title "HealthSync $V" --notes-file notes.md
+          gh release create "$TAG" --draft --verify-tag --title "Healthfolio $V" --notes-file notes.md
 
   binaries:
     needs: prepare
@@ -85,7 +85,9 @@ jobs:
       - id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ github.repository }}
+          # The image keeps its first name after the repository became healthfolio-server,
+          # so docker pull and existing compose files keep getting new versions.
+          images: ghcr.io/herosizy/healthsync-server
           tags: |
             type=semver,pattern={{version}},value=${{ needs.prepare.outputs.tag }}
             type=raw,value=latest

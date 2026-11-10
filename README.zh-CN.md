@@ -1,8 +1,8 @@
-# healthsync-server
+# Healthfolio Server
 
 [English](README.md) | 简体中文
 
-healthsync-server 接收 **HealthSync** iPhone App 发来的 Apple 健康数据。它把数据存在你电脑上的
+Healthfolio Server 接收 **健康册（Healthfolio）** iPhone App（原名 HealthSync）发来的 Apple 健康数据。命令行程序、数据文件夹和 Docker 镜像仍然叫 `healthsync-server`，已有的部署不用改。它把数据存在你电脑上的
 SQLite 数据库里。它是一个二进制文件，或一个 Docker 镜像。它不使用云服务。它不需要账号。
 
 ## 功能
@@ -27,7 +27,7 @@ SQLite 数据库里。它是一个二进制文件，或一个 Docker 镜像。�
 
 ## 两种运行方式
 
-- **HealthSync 桌面 App**（macOS、Windows、Linux）。App 有菜单栏图标和原生窗口。
+- **Healthfolio 桌面 App**（macOS、Windows、Linux）。App 有菜单栏图标和原生窗口。
   [MyGo](https://github.com/egoist/mygo) 用 GPU 绘制窗口。App 不使用网页视图，也不使用 Electron。
   用 App 来：
   - 扫码配对 iPhone。
@@ -158,7 +158,7 @@ go install github.com/herosizy/healthsync-server@latest
 - 服务器只接受来自私有地址和本机地址的配对（`POST /pair`）。
 - 不用配对码配对时，手机和电脑上会显示同一个 4 位确认码。同一地址 10 分钟内最多请求 6 次，同时最多 3 个请求在等待。
 - 控制面板也只接受这些地址。你可以关闭这个限制。
-- 只有运行 HealthSync 的这台电脑可以不输密码打开控制面板，其它电脑需要面板密码（`HEALTHSYNC_DASHBOARD_NO_PASSWORD=1` 可关闭这个要求）。「这台电脑」指浏览器直接打开 `http://127.0.0.1:<端口>` 或 `http://localhost:<端口>`；经过本机上的反向代理或隧道进来的请求，或者用别的主机名访问的请求，同样需要密码。
+- 只有运行 Healthfolio 的这台电脑可以不输密码打开控制面板，其它电脑需要面板密码（`HEALTHSYNC_DASHBOARD_NO_PASSWORD=1` 可关闭这个要求）。「这台电脑」指浏览器直接打开 `http://127.0.0.1:<端口>` 或 `http://localhost:<端口>`；经过本机上的反向代理或隧道进来的请求，或者用别的主机名访问的请求，同样需要密码。
 - 给 AI 助手的令牌是只读的：不能发送数据，也不能再生成令牌。
 - 配对码有 6 位数字。每个配对码只能用一次。配对码 10 分钟内有效。错 5 次后，配对码失效。
 - 服务器只保存每个设备令牌的哈希值。
@@ -294,7 +294,7 @@ AI 助手访问默认打开。要关闭它，使用桌面 App **AI 助手** 页�
 - `healthsync://checkups/latest`：最新的体检报告。
 - `healthsync://summary/7d`：最近 7 天的主要指标。
 - `healthsync://daily/{type}`：一种数据类型最近 30 天的数据。
-- `healthsync://skill`：HealthSync skill。
+- `healthsync://skill`：Healthfolio skill。
 
 ### Skill
 
@@ -351,7 +351,7 @@ App 使用下面的接口。其它客户端也可以使用。
 | `GET /stats` | 返回每种类型的记录数。 |
 | `POST /mcp` | MCP（Streamable HTTP，JSON 响应）。发送 Bearer 令牌。 |
 | `POST /mcp/tokens` | 发送设备的 Bearer 令牌和 `{"name":"Claude"}`。返回给 AI 助手的新只读令牌（scope 为 `mcp`，只能用于 `/mcp` 和 `/auth`，其它接口返回 `403` 和 `"reason":"read_only"`）和可以复制的配置：`{"url","token","transport","configs":{"claude_code","json","vscode","stdio_bridge","agent_prompt"},"config_list":[{"id","title","text"}]}`。你可以撤销这个令牌。AI 助手访问关闭时返回 `403`。 |
-| `GET /skill.md` | 返回给 AI 助手的 HealthSync skill。 |
+| `GET /skill.md` | 返回给 AI 助手的 Healthfolio skill。 |
 | `PATCH /api/devices/{id}` | 控制面板用。发送 `{"name":"…"}` 来重命名设备。令牌不变。 |
 | `POST /api/mcp` | 控制面板用。发送 `{"enabled":true}` 或 `{"enabled":false}` 来打开或关闭 AI 助手访问。 |
 

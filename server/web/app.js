@@ -9,7 +9,7 @@ const ZH = {
   "col.type": "类型", "col.count": "条数", "col.latest": "最新", "col.time": "时间", "col.event": "事件", "col.device": "设备",
   "col.received": "收到", "col.new": "新增", "col.detail": "详情", "col.date": "日期",
   "k.all": "全部", "k.ingest": "数据", "k.report": "体检", "k.pair": "配对", "k.auth": "被拒绝", "k.hook": "钩子",
-  "more": "加载更多", "pair.new": "配对新的 iPhone", "pair.title": "和「健康同步」App 配对",
+  "more": "加载更多", "pair.new": "配对新的 iPhone", "pair.title": "和「健康册」App 配对",
   "pair.s1": "点「配对新的 iPhone」，显示一次性配对码。",
   "pair.s2": "在 iPhone 上用相机扫二维码，或在 App → 添加目的地 → 本地服务器 里扫码。",
   "pair.s3": "App 会自动保存地址和自己的令牌，完成。",
@@ -154,7 +154,7 @@ async function loadOverview() {
   $("#server-name").textContent = o.name;
   $("#server-sub").textContent = o.base_url;
   $("#ver").textContent = o.version;
-  document.title = `${o.name} · HealthSync`;
+  document.title = `${o.name} · Healthfolio`;
   $("#t-total").textContent = fmtNum(o.stats.total);
   $("#t-types").textContent = `${o.stats.types.length} ${t("types")}`;
   const last = o.last_sync;

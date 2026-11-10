@@ -1,7 +1,7 @@
 {
   "name": "HealthSync",
   "identifier": "com.herosizy.healthsync",
-  "version": "0.0.14",
+  "version": "0.0.15",
   "copyright": "Copyright © 2026 HeroSizy",
   "publisher": "HeroSizy",
   "main": "./cmd/healthsync",
@@ -9,7 +9,7 @@
   "icon": "assets/icon.png",
   "updates": {
     "publicKey": "Lzdz75fri8eR1t/RAJ3h0eQF/RnPD+t+OAfJO6IsajY=",
-    "github": "HeroSizy/healthsync-server"
+    "github": "HeroSizy/healthfolio-server"
   },
   "macos": {
     "minimumSystemVersion": "12.0",
@@ -20,7 +20,9 @@
     },
     "infoPlist": {
       "LSUIElement": false,
-      "NSLocalNetworkUsageDescription": "HealthSync receives health data from your iPhone over the local network.",
+      "CFBundleName": "Healthfolio",
+      "CFBundleDisplayName": "Healthfolio",
+      "NSLocalNetworkUsageDescription": "Healthfolio receives health data from your iPhone over the local network.",
       "NSBonjourServices": ["_healthsync._tcp"]
     }
   }

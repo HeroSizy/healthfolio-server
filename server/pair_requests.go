@@ -253,7 +253,7 @@ func macConfirm(ctx context.Context, pp *PendingPair) (allowed, answered bool) {
 	script := fmt.Sprintf(`display dialog "“%[1]s” wants to sync health data to this computer.\n`+
 		`Allow only if your phone shows the code %[2]s.\n\n`+
 		`「%[1]s」想把健康数据同步到这台电脑。\n手机上显示的确认码是 %[2]s 时再点允许。" `+
-		`with title "HealthSync · %[2]s" buttons {"Deny 拒绝", "Allow 允许"} default button "Deny 拒绝" with icon note giving up after %[3]d`,
+		`with title "Healthfolio · %[2]s" buttons {"Deny 拒绝", "Allow 允许"} default button "Deny 拒绝" with icon note giving up after %[3]d`,
 		device, pp.Confirm, wait)
 	out, err := exec.CommandContext(ctx, "/usr/bin/osascript", "-e", script).Output()
 	if err != nil {
