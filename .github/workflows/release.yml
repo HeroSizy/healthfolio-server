@@ -102,11 +102,14 @@ jobs:
 
   desktop:
     # The desktop app, packaged by MyGo with signed self-updates (mygo.json "updates").
-    # Unsigned on macOS (no Developer ID): the first launch needs right-click > Open.
+    # On macOS it is signed with the Developer ID in mygo.json and notarized, on the Mac mini's
+    # own runner (label healthsync-signing), which has the signing keychain.
     needs: prepare
     if: needs.prepare.outputs.release == 'true'
     name: desktop ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
+    # Apple's notary service can take most of an hour for an account's first submissions.
+    timeout-minutes: 240
     strategy:
       fail-fast: false
       # One at a time: each build merges its lines into the release's SHA256SUMS, and two
@@ -114,7 +117,7 @@ jobs:
       max-parallel: 1
       matrix:
         include:
-          - { name: macOS, os: macos-latest, platform: "darwin/arm64,darwin/amd64" }
+          - { name: macOS, os: [self-hosted, macOS, ARM64, healthsync-signing], platform: "darwin/arm64,darwin/amd64" }
           - { name: Windows, os: ubuntu-latest, platform: "windows/amd64,windows/arm64" }
           - { name: Linux, os: ubuntu-latest, platform: "linux/amd64,linux/arm64" }
     steps:
@@ -125,6 +128,25 @@ jobs:
       - name: Install NSIS, for the Windows installers
         if: matrix.name == 'Windows'
         run: sudo apt-get update && sudo apt-get install -y nsis
+      - name: Signing keychain
+        # The Developer ID and the notarytool profile (mytwig-notary, a team API key) are in
+        # the keychain mytwig-signing, shared with MyTwig's releases: unlocked here (a reboot
+        # locks it) and put first in the search list, so codesign never asks. Its password
+        # is in the runner's ~/.mytwig-signing/keychain-password (mode 600).
+        if: matrix.name == 'macOS'
+        run: |
+          kc="$HOME/Library/Keychains/mytwig-signing.keychain-db"
+          pwfile="$HOME/.mytwig-signing/keychain-password"
+          [ -f "$kc" ] && [ -f "$pwfile" ] || { echo "::error::No signing keychain or its password on this runner"; exit 1; }
+          pw=$(cat "$pwfile")
+          echo "::add-mask::$pw"
+          security unlock-keychain -p "$pw" "$kc"
+          security set-keychain-settings "$kc"
+          others=$(security list-keychains -d user | tr -d '"' | grep -v "mytwig-signing" || true)
+          # shellcheck disable=SC2086
+          security list-keychains -d user -s "$kc" $others
+          xcrun notarytool history --keychain-profile mytwig-notary --keychain "$kc" >/dev/null ||
+            { echo "::error::No notarytool profile mytwig-notary in $kc"; exit 1; }
       - name: Build and upload
         env:
           GH_TOKEN: ${{ github.token }}

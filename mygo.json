@@ -13,6 +13,11 @@
   },
   "macos": {
     "minimumSystemVersion": "12.0",
+    "signingIdentity": "Developer ID Application: Zengyu Si (HK2CBGL2Q2)",
+    "notarize": {
+      "keychainProfile": "mytwig-notary",
+      "keychain": "/Users/zen/Library/Keychains/mytwig-signing.keychain-db"
+    },
     "infoPlist": {
       "LSUIElement": false,
       "NSLocalNetworkUsageDescription": "HealthSync receives health data from your iPhone over the local network.",
