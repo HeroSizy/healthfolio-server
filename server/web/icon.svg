@@ -10,8 +10,8 @@
 <circle cx="772" cy="772" r="148" fill="#1f2433"/>
 <rect x="682" y="692" width="180" height="66" rx="18" fill="#ffffff"/>
 <rect x="682" y="786" width="180" height="66" rx="18" fill="#ffffff"/>
-<circle cx="717" cy="725" r="12" fill="#ff3b5c"/>
-<circle cx="717" cy="819" r="12" fill="#ff3b5c"/>
+<circle cx="717" cy="725" r="12" fill="#34c759"/>
+<circle cx="717" cy="819" r="12" fill="#34c759"/>
 <rect x="752" y="719" width="82" height="12" rx="6" fill="#1f2433" fill-opacity="0.22"/>
 <rect x="752" y="813" width="82" height="12" rx="6" fill="#1f2433" fill-opacity="0.22"/>
 </g>
