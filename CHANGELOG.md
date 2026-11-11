@@ -3,6 +3,11 @@
 Releases happen on their own: bump `version` in mygo.json, add its section here, push to
 main. The desktop app shows the section of a new version in its update window.
 
+## 0.0.17
+
+- The icon gets a small server badge, so the computer's app is easy to tell from the
+  iPhone app in the Dock.
+
 ## 0.0.16
 
 - The data folder and the health database are readable by your user only. Older versions

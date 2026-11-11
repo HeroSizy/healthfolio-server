@@ -5,4 +5,14 @@
 <rect x="362" y="652" width="300" height="26" rx="13" fill="#000" fill-opacity="0.08"/>
 <rect x="362" y="700" width="200" height="26" rx="13" fill="#000" fill-opacity="0.08"/>
 <g transform="translate(512 452) scale(0.82) translate(-512 -511)"><g filter="url(#sh)"><path d="M512 672 C 482 650, 330 560, 330 452 C 330 392, 374 350, 428 350 C 464 350, 494 368, 512 398 C 530 368, 560 350, 596 350 C 650 350, 694 392, 694 452 C 694 560, 542 650, 512 672 Z" fill="url(#gH)"/></g><path d="M400 380 C 440 360, 480 372, 500 400 C 470 420, 420 430, 380 470 C 368 430, 376 396, 400 380 Z" fill="url(#gloss)"/></g>
+<g transform="translate(772 772) scale(0.82) translate(-772 -772)">
+<g filter="url(#cs)"><circle cx="772" cy="772" r="168" fill="#ffffff"/></g>
+<circle cx="772" cy="772" r="148" fill="#1f2433"/>
+<rect x="682" y="692" width="180" height="66" rx="18" fill="#ffffff"/>
+<rect x="682" y="786" width="180" height="66" rx="18" fill="#ffffff"/>
+<circle cx="717" cy="725" r="12" fill="#ff3b5c"/>
+<circle cx="717" cy="819" r="12" fill="#ff3b5c"/>
+<rect x="752" y="719" width="82" height="12" rx="6" fill="#1f2433" fill-opacity="0.22"/>
+<rect x="752" y="813" width="82" height="12" rx="6" fill="#1f2433" fill-opacity="0.22"/>
+</g>
 </svg>
