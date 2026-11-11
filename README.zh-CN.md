@@ -2,6 +2,8 @@
 
 # Healthfolio Server
 
+官网：[healthfolio.herosizy.dev](https://healthfolio.herosizy.dev)
+
 [English](README.md) | 简体中文
 
 Healthfolio Server 接收 **健康册（Healthfolio）** iPhone App（原名 HealthSync）发来的 Apple 健康数据。命令行程序、数据文件夹和 Docker 镜像仍然叫 `healthsync-server`，已有的部署不用改。它把数据存在你电脑上的
