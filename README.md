@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/readme-icon.png" width="128" height="128" alt="Healthfolio icon"></p>
+
 # Healthfolio Server
 
 English | [简体中文](README.zh-CN.md)
