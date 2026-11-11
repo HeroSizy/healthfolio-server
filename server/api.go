@@ -46,6 +46,9 @@ func Start(cfg *Config, onEvent func(model.LogEntry)) (*Instance, error) {
 	if err != nil {
 		return nil, err
 	}
+	if cfg.DataDir == expandHome(defaultDataDir()) {
+		tightenPermissions(cfg.DataDir)
+	}
 	db.onLog = onEvent
 	srv, err := NewServer(cfg, db, token)
 	if err != nil {

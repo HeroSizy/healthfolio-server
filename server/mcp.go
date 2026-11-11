@@ -18,8 +18,8 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"path/filepath"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -322,7 +322,7 @@ func (s *Server) handleMCP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if _, ok := s.authDevice(r); !ok {
-		w.Header().Set("WWW-Authenticate", `Bearer realm="HealthSync"`)
+		w.Header().Set("WWW-Authenticate", `Bearer realm="Healthfolio"`)
 		errJSON(w, 401, "bad token")
 		return
 	}

@@ -3,6 +3,17 @@
 Releases happen on their own: bump `version` in mygo.json, add its section here, push to
 main. The desktop app shows the section of a new version in its update window.
 
+## 0.0.16
+
+- The data folder and the health database are readable by your user only. Older versions
+  left them readable by other users of the computer.
+- The web dashboard stops taking passwords from an address after 10 wrong ones in 15
+  minutes, so a weak password can't be guessed by trying many.
+- When the window is narrow, the four numbers on the overview wrap into two rows instead
+  of being cut short.
+- The sync history shows the server's own messages in Chinese too, and «Rejected» covers
+  wrong passwords as well as wrong tokens.
+
 ## 0.0.15
 
 - HealthSync is now **Healthfolio**, with a new icon, to match the iPhone app (健康册). Your

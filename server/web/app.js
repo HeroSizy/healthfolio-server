@@ -1,6 +1,18 @@
 "use strict";
 
 // ------------------------------------------------------------------ i18n
+const LOG_ZH = [
+  ["bad token on ", "令牌错误："],
+  ["read-only AI token used on ", "AI 助手的只读令牌试图访问："],
+  ["MCP token created in the app", "在 App 里为 AI 助手生成了令牌"],
+  ["AI token created in dashboard", "在网页面板里为 AI 助手生成了令牌"],
+  ["MCP token created", "为 AI 助手生成了令牌"],
+  ["wrong or expired code", "配对码错误或已过期"],
+  ["denied on the computer", "在电脑上被拒绝"],
+  ["refused: not from the local network or Tailscale", "已拒绝：不是来自局域网或 Tailscale"],
+  ["refused: ", "已拒绝："],
+  ["too many failed attempts", "失败次数太多，暂时拒绝"],
+];
 const ZH = {
   "tab.overview": "概览", "tab.history": "同步记录", "tab.devices": "配对和设备", "tab.reports": "体检报告",
   "ov.records": "健康记录", "ov.last": "最近同步", "ov.devices": "已配对设备", "ov.pairnew": "配对新的 iPhone →",
@@ -8,7 +20,7 @@ const ZH = {
   "ov.pick": "选择一个类型", "ov.pickhint": "点左边的数据类型，查看每天的数值。", "ov.server": "服务器",
   "col.type": "类型", "col.count": "条数", "col.latest": "最新", "col.time": "时间", "col.event": "事件", "col.device": "设备",
   "col.received": "收到", "col.new": "新增", "col.detail": "详情", "col.date": "日期",
-  "k.all": "全部", "k.ingest": "数据", "k.report": "体检", "k.pair": "配对", "k.auth": "被拒绝", "k.hook": "钩子",
+  "k.all": "全部", "k.ingest": "数据", "k.report": "体检", "k.pair": "配对", "k.auth": "被拒绝", "k.hook": "同步后命令",
   "more": "加载更多", "pair.new": "配对新的 iPhone", "pair.title": "和「健康册」App 配对",
   "pair.s1": "点「配对新的 iPhone」，显示一次性配对码。",
   "pair.s2": "在 iPhone 上用相机扫二维码，或在 App → 添加目的地 → 本地服务器 里扫码。",
@@ -22,7 +34,7 @@ const ZH = {
   "rep.inst": "机构", "rep.items": "项目", "rep.flagged": "异常", "rep.received": "收到时间", "rep.none": "还没有体检报告。",
   "pend.title": "有设备请求配对", "pend.allow": "允许", "pend.deny": "拒绝", "pend.from": "来自",
   "pend.confirm": "手机上显示的确认码一致时再允许",
-  "ev.ingest": "同步数据", "ev.report": "体检报告", "ev.pair": "配对", "ev.auth": "令牌错误", "ev.hook": "钩子", "ev.backup": "备份",
+  "ev.ingest": "同步数据", "ev.report": "体检报告", "ev.pair": "配对", "ev.auth": "被拒绝", "ev.hook": "同步后命令", "ev.backup": "备份",
   "rd.item": "项目", "rd.value": "结果", "rd.range": "参考范围", "rd.pick": "点左边的项目，在原件里找到它。",
   "rd.files": "{n} 个原件", "rd.nofiles": "服务器上没有这份报告的原件（App 备份时要勾选「原始报告文件」）。",
   "rd.noloc": "这个项目没有位置信息（较早导入的报告没有）。", "rd.missing": "原件 {name} 不在服务器上。",
@@ -47,7 +59,7 @@ const EN_FALLBACK = {
   "dev.confirm": "This device won't be able to sync any more until it pairs again. Revoke?", "tok.hide": "Hide",
   "rep.none": "No checkup reports yet.", "pend.title": "A device wants to pair", "pend.allow": "Allow", "pend.deny": "Deny", "pend.from": "from",
   "pend.confirm": "Allow only if the phone shows the same code",
-  "ev.ingest": "Data", "ev.report": "Checkup", "ev.pair": "Pairing", "ev.auth": "Bad token", "ev.hook": "Hook", "ev.backup": "Backup",
+  "ev.ingest": "Data", "ev.report": "Checkup", "ev.pair": "Pairing", "ev.auth": "Rejected", "ev.hook": "Hook", "ev.backup": "Backup",
   "rd.item": "Item", "rd.value": "Result", "rd.range": "Range", "rd.pick": "Click an item to find it in the original.",
   "rd.files": "{n} original(s)", "rd.nofiles": "No original of this report on the server (in the app's backup, turn on Original report files).",
   "rd.noloc": "This item has no location (reports imported earlier don't).", "rd.missing": "The original {name} is not on the server.",
@@ -229,10 +241,16 @@ async function loadLogs(reset) {
   const q = new URLSearchParams({ limit: 100, kind: logKind });
   if (oldest) q.set("before", oldest);
   const rows = await api("/api/logs?" + q);
+  // the server's own messages are stored in English
+  const logMessage = m => {
+    if (lang !== "zh") return m;
+    for (const [en, zh] of LOG_ZH) if (m.startsWith(en)) return zh + m.slice(en.length);
+    return m;
+  };
   if (rows.length) oldest = rows[rows.length - 1].id;
   const html = rows.map(r => {
     const status = r.ok ? `<span class="badge ok">${t("ok")}</span>` : `<span class="badge bad">${t("fail")}</span>`;
-    let detail = esc(r.message || "");
+    let detail = esc(logMessage(r.message || ""));
     if (r.types && r.types.length) detail = `<details><summary>${r.types.length} ${t("types")}</summary><pre>${esc(r.types.map(prettyType).join("\n"))}</pre></details>` + detail;
     if (r.kind === "hook" && r.message) detail = `<details><summary>output</summary><pre>${esc(r.message)}</pre></details>`;
     const meta = [r.ip, r.duration_ms ? r.duration_ms + " ms" : "", r.bytes ? fmtNum(r.bytes / 1024) + " KB" : ""].filter(Boolean).join(" · ");

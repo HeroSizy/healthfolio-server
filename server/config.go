@@ -128,6 +128,23 @@ func (c *Config) Prepare() error {
 	return os.MkdirAll(c.DataDir, 0o700)
 }
 
+// tightenPermissions makes the default data folder and the database files readable by
+// this user only. Versions before 0.0.16 left them readable by other users of the
+// computer (0755 and 0644), and SQLite creates its files with the umask's mode. A folder
+// the user chose is left as it is: it may be shared on purpose (a Docker volume, a NAS).
+func tightenPermissions(dir string) {
+	if runtime.GOOS == "windows" {
+		return
+	}
+	_ = os.Chmod(dir, 0o700)
+	for _, f := range []string{"health.db", "health.db-wal", "health.db-shm", "updater.json"} {
+		p := filepath.Join(dir, f)
+		if fi, err := os.Stat(p); err == nil && fi.Mode().Perm()&0o077 != 0 {
+			_ = os.Chmod(p, 0o600)
+		}
+	}
+}
+
 func (c *Config) BaseURL() string {
 	if c.PublicURL != "" {
 		return c.PublicURL

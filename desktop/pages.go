@@ -21,7 +21,8 @@ func (a *App) overviewPage(c *ui.Context, pal *palette) {
 	ui.Scroll(c).Grow(1).MinHeight(0).Children(func() {
 		ui.Column(c).Padding(4, 22, 22, 22).Gap(16).Children(func() {
 			// tiles
-			ui.Row(c).Gap(12).Children(func() {
+			// two rows of two when the window is narrow, so the numbers are never cut short
+			ui.Row(c).Gap(12).Wrap().Children(func() {
 				last, lastHint := a.t("从未", "Never"), ""
 				if s := o.LastSync; s != nil {
 					last = ago(a.zh, s.Time)
@@ -98,7 +99,7 @@ func (a *App) storageSection(c *ui.Context, pal *palette, st model.Storage) {
 			})
 			for i, p := range st.Parts {
 				name := storageKinds[p.Kind]
-				ui.Row(c.Key("st-"+p.Kind)).AlignItems(ui.Center).Gap(10).Children(func() {
+				ui.Row(c.Key("st-" + p.Kind)).AlignItems(ui.Center).Gap(10).Children(func() {
 					ui.Box(c).Size(8, 8).Radius(4).Background(colors[min(i, len(colors)-1)]).Shrink(0)
 					ui.Text(c, firstNonEmpty(a.t(name[0], name[1]), p.Kind)).FontSize(13).TextColor(pal.text).Width(130).Shrink(0)
 					ui.Text(c, p.Path).FontSize(11).Font("monospace").TextColor(pal.textFaint).Grow(1).MinWidth(0).SingleLine().Ellipsis("…").Tooltip(p.Path)
@@ -127,7 +128,7 @@ func bytesLabel(n int64) string {
 
 // tile is a number with its label, rising in as the page opens.
 func (a *App) tile(c *ui.Context, pal *palette, key, label, value, hint string, i int) {
-	t := ui.Column(c.Key(key)).Grow(1).Basis(0).MinWidth(0).Gap(3).Padding(14, 16).Radius(12).Background(pal.inset)
+	t := ui.Column(c.Key(key)).Grow(1).Basis(170).MinWidth(0).Gap(3).Padding(14, 16).Radius(12).Background(pal.inset)
 	appear := t.AnimateTo("in", 1, ui.Animation{Spring: ui.SpringOptions{Duration: 450 * time.Millisecond, Bounce: 0.2}, Delay: time.Duration(i) * 60 * time.Millisecond})
 	t.Opacity(appear).Translate(0, (1-appear)*8)
 	t.Children(func() {
@@ -284,7 +285,7 @@ func (a *App) typesList(c *ui.Context, pal *palette) {
 
 // ---------------------------------------------------------------- history
 
-var kindLabels = [][2]string{{"全部", "All"}, {"数据", "Data"}, {"体检", "Checkups"}, {"配对", "Pairing"}, {"被拒绝", "Rejected"}, {"钩子", "Hook"}}
+var kindLabels = [][2]string{{"全部", "All"}, {"数据", "Data"}, {"体检", "Checkups"}, {"配对", "Pairing"}, {"被拒绝", "Rejected"}, {"同步后命令", "Hook"}}
 
 func (a *App) historyPage(c *ui.Context, pal *palette) {
 	labels := make([]string, len(kindLabels))
@@ -341,7 +342,7 @@ func (a *App) historyPage(c *ui.Context, pal *palette) {
 					ui.Text(c, num(float64(e.Added))).FontSize(13).FontWeight(600)
 				}
 			case 5:
-				msg := e.Message
+				msg := a.logMessage(e.Message)
 				if len(e.Types) > 0 {
 					names := make([]string, 0, len(e.Types))
 					for _, t := range e.Types {
@@ -355,8 +356,35 @@ func (a *App) historyPage(c *ui.Context, pal *palette) {
 	})
 }
 
+// logMessages are the server's own messages in the sync history (it stores them in
+// English), by their start, in Chinese.
+var logMessages = [][2]string{
+	{"bad token on ", "令牌错误："},
+	{"read-only AI token used on ", "AI 助手的只读令牌试图访问："},
+	{"MCP token created in the app", "在 App 里为 AI 助手生成了令牌"},
+	{"AI token created in dashboard", "在网页面板里为 AI 助手生成了令牌"},
+	{"MCP token created", "为 AI 助手生成了令牌"},
+	{"wrong or expired code", "配对码错误或已过期"},
+	{"denied on the computer", "在电脑上被拒绝"},
+	{"refused: not from the local network or Tailscale", "已拒绝：不是来自局域网或 Tailscale"},
+	{"refused: ", "已拒绝："},
+	{"too many failed attempts", "失败次数太多，暂时拒绝"},
+}
+
+func (a *App) logMessage(m string) string {
+	if !a.zh {
+		return m
+	}
+	for _, p := range logMessages {
+		if rest, ok := strings.CutPrefix(m, p[0]); ok {
+			return p[1] + rest
+		}
+	}
+	return m
+}
+
 func (a *App) eventBadge(c *ui.Context, pal *palette, e model.LogEntry) {
-	names := map[string][2]string{"ingest": {"同步数据", "Data"}, "report": {"体检报告", "Checkup"}, "pair": {"配对", "Pairing"}, "auth": {"令牌错误", "Bad token"}, "hook": {"钩子", "Hook"}, "backup": {"备份", "Backup"}}
+	names := map[string][2]string{"ingest": {"同步数据", "Data"}, "report": {"体检报告", "Checkup"}, "pair": {"配对", "Pairing"}, "auth": {"被拒绝", "Rejected"}, "hook": {"同步后命令", "Hook"}, "backup": {"备份", "Backup"}}
 	n := names[e.Kind]
 	fg, bg := pal.ok, pal.okSoft
 	if !e.OK {
@@ -594,7 +622,7 @@ func (a *App) mcpPage(c *ui.Context, pal *palette) {
 			if a.mcp != nil {
 				ui.Text(c, a.t("现在复制，之后不会再显示这个令牌。", "Copy it now: this token won't be shown again.")).FontSize(12).TextColor(pal.accent)
 				titles := map[string]string{"claude_code": "Claude Code", "json": a.t("JSON 配置（Cursor 等用 mcpServers 的客户端）", "JSON (Cursor and other mcpServers clients)"),
-						"vscode": a.t("VS Code（.vscode/mcp.json）", "VS Code (.vscode/mcp.json)"),
+					"vscode":       a.t("VS Code（.vscode/mcp.json）", "VS Code (.vscode/mcp.json)"),
 					"stdio_bridge": a.t("Claude Desktop（桥接）", "Claude Desktop (bridge)"), "agent_prompt": a.t("给任何 AI agent 的说明", "Instructions for any agent")}
 				for i, cfg := range a.mcp.ConfigList {
 					a.copyBlock(c, pal, i, firstNonEmpty(titles[cfg.ID], cfg.Title), cfg.Text)

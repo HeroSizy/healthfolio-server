@@ -153,7 +153,7 @@ func (a *App) load() {
 		a.moreLogs = len(logs) == 200
 		a.setPair(pair)
 		a.decideOnboarding()
-		if a.selType == ""&& len(ov.Stats.Types) > 0 {
+		if a.selType == "" && len(ov.Stats.Types) > 0 {
 			a.selType = ov.Stats.Types[0].Type
 			go a.loadDaily()
 		}

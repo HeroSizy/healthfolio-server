@@ -22,6 +22,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -47,6 +48,61 @@ type Server struct {
 	started time.Time
 	mux     *http.ServeMux
 	stor    storageCache
+	pwFails failures // wrong dashboard passwords, by address
+}
+
+// failures counts wrong dashboard passwords from each address. The password is chosen by
+// a person and may be short, so after maxPasswordFails wrong ones in failWindow that
+// address gets 429 until the window ends. (Tokens are 192 random bits: guessing them is
+// hopeless, so they need no such limit.)
+type failures struct {
+	mu sync.Mutex
+	m  map[string]failCount
+}
+
+type failCount struct {
+	n     int
+	since time.Time
+}
+
+const (
+	maxPasswordFails = 10
+	failWindow       = 15 * time.Minute
+)
+
+// blocked reports how long ip must wait, or 0.
+func (f *failures) blocked(ip string) time.Duration {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	c, ok := f.m[ip]
+	if !ok || time.Since(c.since) > failWindow {
+		return 0
+	}
+	if c.n >= maxPasswordFails {
+		return failWindow - time.Since(c.since)
+	}
+	return 0
+}
+
+func (f *failures) add(ip string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.m == nil {
+		f.m = map[string]failCount{}
+	}
+	c := f.m[ip]
+	if time.Since(c.since) > failWindow {
+		c = failCount{since: time.Now()}
+	}
+	c.n++
+	f.m[ip] = c
+	if len(f.m) > 4096 { // forget the old ones rather than grow without end
+		for k, v := range f.m {
+			if time.Since(v.since) > failWindow {
+				delete(f.m, k)
+			}
+		}
+	}
 }
 
 func NewServer(cfg *Config, db *DB, token string) (*Server, error) {
@@ -269,9 +325,20 @@ func (s *Server) admin(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 		if !local && s.cfg.AdminPassword != "" {
+			if wait := s.pwFails.blocked(ip); wait > 0 {
+				w.Header().Set("Retry-After", strconv.Itoa(int(wait.Seconds())+1))
+				http.Error(w, "Too many wrong passwords. Try again later.", http.StatusTooManyRequests)
+				return
+			}
 			_, pw, ok := r.BasicAuth()
 			if !ok || subtle.ConstantTimeCompare([]byte(pw), []byte(s.cfg.AdminPassword)) != 1 {
-				w.Header().Set("WWW-Authenticate", `Basic realm="HealthSync"`)
+				if ok { // a browser asks first without a password: that is no attempt
+					s.pwFails.add(ip)
+					if s.pwFails.blocked(ip) > 0 {
+						s.db.Log(LogEntry{Kind: "auth", IP: ip, Message: "too many failed attempts at the dashboard password"})
+					}
+				}
+				w.Header().Set("WWW-Authenticate", `Basic realm="Healthfolio"`)
 				http.Error(w, "password required", http.StatusUnauthorized)
 				return
 			}

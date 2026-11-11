@@ -19,7 +19,7 @@ type CSVOutput struct {
 }
 
 func NewCSVOutput(dir string) (*CSVOutput, error) {
-	return &CSVOutput{dir: dir}, os.MkdirAll(dir, 0o755)
+	return &CSVOutput{dir: dir}, os.MkdirAll(dir, 0o700)
 }
 
 func (c *CSVOutput) Write(rows []Record) (int, error) {
@@ -36,7 +36,7 @@ func (c *CSVOutput) Write(rows []Record) (int, error) {
 	for day, items := range byDay {
 		p := filepath.Join(c.dir, filepath.Base(day)+".csv")
 		_, statErr := os.Stat(p)
-		f, err := os.OpenFile(p, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+		f, err := os.OpenFile(p, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 		if err != nil {
 			return 0, err
 		}
