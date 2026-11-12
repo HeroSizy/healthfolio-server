@@ -17,7 +17,7 @@ import (
 	"github.com/herosizy/healthsync-server/server"
 )
 
-const usage = `healthsync-server — local receiver for the HealthSync iPhone app
+const usage = `healthsync-server — local receiver for the Healthfolio iPhone app
 
 Usage:
   healthsync-server [serve] [flags]   run the server (default)
@@ -112,7 +112,7 @@ func cmdPair(cfg *server.Config) error {
 	link := server.PairLink(cfg.BaseURL(), server.TailscaleURL(cfg.Port), c.Code, cfg.Name)
 	fmt.Printf("\nPairing code / 配对码:  %s %s   (valid %d min, one use)\n\n", c.Code[:3], c.Code[3:], int(server.PairTTL.Minutes()))
 	fmt.Print(server.QRTerminal(link))
-	fmt.Printf("\nScan with the HealthSync app (or the iPhone camera), or open:\n%s\n\n", link)
+	fmt.Printf("\nScan with the Healthfolio app (or the iPhone camera), or open:\n%s\n\n", link)
 	fmt.Printf("The server must be running. Dashboard: %s/\n", cfg.BaseURL())
 	return nil
 }

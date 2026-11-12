@@ -8,9 +8,9 @@ import (
 )
 
 // The first launch walks through four steps instead of opening on an empty overview:
-// what HealthSync does, naming this computer and picking the data folder, pairing the
+// what Healthfolio does, naming this computer and picking the data folder, pairing the
 // iPhone, and where things are. It shows only on a computer with no paired device and no
-// data, so people who already use HealthSync never see it.
+// data, so people who already use Healthfolio never see it.
 
 const obSteps = 4
 

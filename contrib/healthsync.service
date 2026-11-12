@@ -4,7 +4,7 @@
 #   systemctl --user enable --now healthsync
 #   loginctl enable-linger "$USER"     # keep running when you're logged out
 [Unit]
-Description=HealthSync server
+Description=Healthfolio server
 After=network-online.target
 Wants=network-online.target
 

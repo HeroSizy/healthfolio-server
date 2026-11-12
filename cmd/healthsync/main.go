@@ -1,4 +1,4 @@
-// HealthSync is the desktop app: the HealthSync server with a menu bar icon and a native
+// Healthfolio is the desktop app: the Healthfolio server with a menu bar icon and a native
 // window (drawn by MyGo, no webview). It receives Apple Health data from the iPhone app and
 // keeps it in SQLite, like the headless healthsync-server.
 //
@@ -207,7 +207,7 @@ func (h *host) onEvent(e model.LogEntry) {
 
 func (h *host) ready() {
 	if runtime.GOOS == "darwin" {
-		// The HealthSync menu in the menu bar, with "Check for Updates…" after About.
+		// The Healthfolio menu in the menu bar, with "Check for Updates…" after About.
 		mygo.App.SetMenu(mygo.NewMenu([]*mygo.MenuItem{
 			{Label: "Healthfolio", Submenu: []*mygo.MenuItem{
 				{Role: mygo.RoleAbout},

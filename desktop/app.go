@@ -1,4 +1,4 @@
-// Package desktop is the native window of the HealthSync desktop app, drawn with MyGo's
+// Package desktop is the native window of the Healthfolio desktop app, drawn with MyGo's
 // package ui. It knows nothing about SQLite or HTTP: it reads everything through Backend,
 // so the same views run in the app and, with sample data, in a browser preview.
 package desktop

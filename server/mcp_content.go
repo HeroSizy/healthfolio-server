@@ -2,7 +2,7 @@ package server
 
 // MCP prompts and resources: ready-made questions an assistant can offer the user, and
 // read-only documents (the database schema, the data types, the latest checkup, the last
-// 7 days, the HealthSync skill).
+// 7 days, the Healthfolio skill).
 
 import (
 	_ "embed"
@@ -17,7 +17,7 @@ const mcpOffMessage = "AI assistant access (MCP) is turned off in Healthfolio. T
 //go:embed skill/SKILL.md
 var skillMD string
 
-// SkillMD is the HealthSync skill for AI assistants (Claude Code and others).
+// SkillMD is the Healthfolio skill for AI assistants (Claude Code and others).
 func SkillMD() string { return skillMD }
 
 type promptArg struct {
