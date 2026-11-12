@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"image"
 	"image/color"
+	"math"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 	qrcode "github.com/skip2/go-qrcode"
@@ -24,6 +26,7 @@ var (
 	iconReports  = svgIcon(`<path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/><path d="M8 14h3l1.5-3 2 6 1.5-3H17"/>`)
 	iconSettings = svgIcon(`<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>`)
 	iconCopy     = svgIcon(`<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>`)
+	iconCheck    = ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>`))
 	_            = ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path fill="#fff" d="M12 20.5s-7.5-4.6-7.5-10.2A4.3 4.3 0 0 1 12 7.6a4.3 4.3 0 0 1 7.5 2.7c0 5.6-7.5 10.2-7.5 10.2z"/></svg>`))
 )
 
@@ -105,7 +108,7 @@ func (a *App) updateChip(c *ui.Context, pal *palette) {
 func (a *App) navRow(c *ui.Context, pal *palette, it navItem) {
 	sel := a.page == it.id
 	r := ui.ButtonBase(c.Key(it.id)).Height(32).Padding(0, 10).Radius(9).AlignItems(ui.Center).Gap(10).
-		Label(a.t(it.zh, it.en))
+		Label(a.t(it.zh, it.en)).Transition(ui.ElementTransition{Colors: true, Shadows: true, Duration: 160 * time.Millisecond})
 	switch {
 	case sel:
 		r.Background(pal.rowSelected).Border(1, pal.rowBorder).Shadow(0, 1, 3, 0, pal.rowShadow)
@@ -153,8 +156,14 @@ func (a *App) status(c *ui.Context, pal *palette) {
 			d := ui.Box(c).Size(8, 8).Radius(4).Background(dot)
 			if b != nil {
 				// A still glow: a looping animation redraws the window 60 times a second
-				// for as long as the app runs, which kept a CPU core 40% busy.
-				d.Shadow(0, 0, 6, 2, dot.Alpha(0.45))
+				// for as long as the app runs, which kept a CPU core 40% busy. It swells
+				// once when a sync arrives, and is still again 1.6 s later.
+				glow := float32(0)
+				if a.pulse != "" {
+					p := d.AnimateTo("pulse"+a.pulse, 1, ui.Animation{Duration: 1600 * time.Millisecond, Ease: ui.EaseOut})
+					glow = float32(math.Sin(float64(p) * math.Pi))
+				}
+				d.Shadow(0, 0, 6+16*glow, 2+8*glow, dot.Alpha(0.45+0.3*glow))
 			}
 			ui.Text(c, label).FontSize(12).FontWeight(600).TextColor(pal.text)
 		})

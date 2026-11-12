@@ -14,7 +14,8 @@ const LOG_ZH = [
   ["too many failed attempts", "失败次数太多，暂时拒绝"],
 ];
 const ZH = {
-  "tab.overview": "概览", "tab.history": "同步记录", "tab.devices": "配对和设备", "tab.reports": "体检报告",
+  "tab.overview": "概览", "tab.history": "同步记录", "tab.devices": "配对和设备", "tab.reports": "体检报告", "tab.mcp": "AI 助手",
+  "st.running": "运行中", "toast.sync": "收到 {dev} 的 {n} 条新数据", "toast.paired": "已配对 {dev}",
   "ov.records": "健康记录", "ov.last": "最近同步", "ov.devices": "已配对设备", "ov.pairnew": "配对新的 iPhone →",
   "ov.reports": "体检报告", "ov.activity": "每天的记录", "ov.30d": "最近 30 天，按数据本身的日期", "ov.types": "数据类型", "ov.filter": "筛选",
   "ov.pick": "选择一个类型", "ov.pickhint": "点左边的数据类型，查看每天的数值。", "ov.server": "服务器",
@@ -46,7 +47,7 @@ const ZH = {
   "srv.pairing": "配对方式", "srv.password": "控制面板密码", "yes": "已设置", "no": "未设置（仅局域网可访问）",
   "ago.s": "刚刚", "ago.m": "{n} 分钟前", "ago.h": "{n} 小时前", "ago.d": "{n} 天前", "copied": "已复制",
   "unit.records": "条", "dev.shared": "共享令牌", "copy": "复制",
-  "mcp.title": "AI 助手（MCP）", "mcp.hint": "让 Claude 等支持 MCP 的 AI 助手读取你的健康数据（只读）。给它单独建一个令牌，和设备一样可以在上面撤销。",
+  "mcp.title": "AI 助手（MCP）", "mcp.hint": "让 Claude 等支持 MCP 的 AI 助手读取你的健康数据（只读）。给它单独建一个令牌，和设备一样可以在「配对和设备」里撤销。",
   "mcp.create": "为 AI 助手创建令牌", "mcp.once": "现在复制，之后不会再显示。", "mcp.other": "其它客户端（Streamable HTTP）",
   "mcp.local": "在这台电脑上，桌面 App 也可以直接通过 stdio 运行，不需要令牌：",
   "mcp.on": "允许 AI 助手", "mcp.offHint": "已关闭：所有 AI 助手都连不上。令牌保留，重新打开就能用。",
@@ -69,6 +70,7 @@ const EN_FALLBACK = {
   "ok": "OK", "fail": "Failed", "never": "Never", "none": "Nothing yet.", "types": "types",
   "srv.address": "Address for phones", "srv.data": "Data directory", "srv.outputs": "Storage", "srv.version": "Version", "srv.started": "Started",
   "srv.pairing": "Pairing", "srv.password": "Dashboard password", "yes": "set", "no": "not set (LAN only)",
+  "toast.sync": "{n} new records from {dev}", "toast.paired": "{dev} is paired",
   "ago.s": "just now", "ago.m": "{n} min ago", "ago.h": "{n} h ago", "ago.d": "{n} d ago", "copied": "Copied", "unit.records": "", "dev.shared": "shared token", "copy": "Copy",
 };
 function t(key, vars) {
@@ -123,12 +125,19 @@ function barChart(el, points, { label, value, fail, fmt = fmtNum }) {
   const max = Math.max(1, ...points.map(value));
   const bw = (W - padL) / points.length;
   const y = v => padT + (H - padT - padB) * (1 - v / max);
+  // Bars grow in when the chart first shows or shows other days; on a refresh only the
+  // bars whose value changed grow (a sync adding to today), the rest stay still.
+  const prev = el._vals || null, labels = points.map(label).join();
+  const fresh = !prev || el._labels !== labels;
+  el._vals = Object.fromEntries(points.map(p => [label(p), value(p)])); el._labels = labels;
   let svg = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">`;
   for (const g of [0, .5, 1]) svg += `<line class="grid" x1="${padL}" x2="${W}" y1="${y(max * g)}" y2="${y(max * g)}"/><text class="axis" x="${padL - 6}" y="${y(max * g) + 3}" text-anchor="end">${fmtAxis(max * g)}</text>`;
   points.forEach((p, i) => {
-    const v = value(p), x = padL + i * bw + bw * .15, h = Math.max(v ? 2 : 0, H - padB - y(v));
-    svg += `<rect class="bar${fail && fail(p) && !v ? " fail" : ""}" x="${x}" y="${H - padB - h}" width="${bw * .7}" height="${fail && fail(p) && !v ? 2 : h}" rx="2" data-tip="${esc(label(p))}: ${esc(fmt(v))}"/>`;
-    if (i % Math.ceil(points.length / 6) === 0) svg += `<text class="axis" x="${x + bw * .35}" y="${H - 4}" text-anchor="middle">${esc(label(p).slice(5))}</text>`;
+    // a few days of data must not make a few huge slabs: bars are at most 28 wide
+    const w = Math.min(bw * .7, 28), v = value(p), x = padL + i * bw + (bw - w) / 2, h = Math.max(v ? 2 : 0, H - padB - y(v));
+    const grow = fresh ? ` grow" style="animation-delay:${Math.min(i * 12, 360)}ms` : prev[label(p)] !== v ? " grow" : "";
+    svg += `<rect class="bar${fail && fail(p) && !v ? " fail" : ""}${grow}" x="${x}" y="${H - padB - h}" width="${w}" height="${fail && fail(p) && !v ? 2 : h}" rx="${Math.min(4, w / 4)}" data-tip="${esc(label(p))}: ${esc(fmt(v))}"/>`;
+    if (i % Math.ceil(points.length / 6) === 0) svg += `<text class="axis" x="${x + w / 2}" y="${H - 4}" text-anchor="middle">${esc(label(p).slice(5))}</text>`;
   });
   el.innerHTML = svg + "</svg>";
   attachTips(el);
@@ -146,14 +155,60 @@ function attachTips(el) {
 }
 
 // ------------------------------------------------------------------ tabs
-const tabs = ["overview", "history", "devices", "reports"];
+const tabs = ["overview", "history", "devices", "mcp", "reports"];
 function show(tab) {
   tab = tab.split("/")[0]; // #reports/<id>/<item> opens a report
   if (!tabs.includes(tab)) tab = "overview";
   for (const name of tabs) $(`#tab-${name}`).hidden = name !== tab;
   document.querySelectorAll(".tabs button").forEach(b => b.setAttribute("aria-selected", b.dataset.tab === tab));
-  ({ overview: loadOverview, history: () => loadLogs(true), devices: loadPairing, reports: loadReports })[tab]();
+  ({ overview: loadOverview, history: () => loadLogs(true), devices: loadPairing, mcp: loadMCP, reports: loadReports })[tab]();
   current = tab;
+}
+
+// ------------------------------------------------------------------ header, live status, toasts
+let lastSyncKey = null, knownDevices = null;
+function applyHeader(o) {
+  $("#server-name").textContent = o.name;
+  $("#server-sub").textContent = o.base_url.replace(/^https?:\/\//, "");
+  $("#ver").textContent = o.version;
+  document.title = `${o.name} · Healthfolio`;
+  // a new sync makes the status light pulse once and says so
+  const s = o.last_sync;
+  const key = s ? `${s.time}/${s.received}/${s.added}` : "";
+  if (lastSyncKey !== null && key && key !== lastSyncKey && Date.now() - new Date(s.time) < 120000) {
+    pulse($("#live"));
+    if (s.added > 0) toast(t("toast.sync", { dev: devName(s.device || "iPhone"), n: fmtNum(s.added) }));
+  }
+  lastSyncKey = key;
+}
+function pulse(el) {
+  el.classList.remove("pulse");
+  void el.offsetWidth; // restart the animation
+  el.classList.add("pulse");
+}
+let toastTimer = 0;
+function toast(msg) {
+  const el = $("#toast");
+  el.textContent = msg; el.hidden = false;
+  requestAnimationFrame(() => el.classList.add("on"));
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { el.classList.remove("on"); setTimeout(() => { el.hidden = true; }, 300); }, 4000);
+}
+// countTo rolls a number tile to its new value (not on the first load, and not for people
+// who asked for less motion).
+const lessMotion = matchMedia("(prefers-reduced-motion: reduce)");
+function countTo(el, to, fmt = fmtNum) {
+  const from = +el.dataset.n;
+  el.dataset.n = to;
+  if (!Number.isFinite(from) || from === to || lessMotion.matches || document.hidden) { el.textContent = fmt(to); return; }
+  const start = performance.now(), dur = 700;
+  const step = now => {
+    const p = Math.min(1, (now - start) / dur), e = 1 - Math.pow(1 - p, 3);
+    el.textContent = fmt(from + (to - from) * e);
+    if (p < 1 && +el.dataset.n === to) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+  el.classList.remove("bump"); void el.offsetWidth; el.classList.add("bump");
 }
 let current = "overview";
 document.querySelectorAll(".tabs button").forEach(b => b.addEventListener("click", () => { location.hash = b.dataset.tab; }));
@@ -163,20 +218,20 @@ addEventListener("hashchange", () => show(location.hash.slice(1)));
 let types = [], selType = null;
 async function loadOverview() {
   const o = await api("/api/overview");
-  $("#server-name").textContent = o.name;
-  $("#server-sub").textContent = o.base_url;
-  $("#ver").textContent = o.version;
-  document.title = `${o.name} · Healthfolio`;
-  $("#t-total").textContent = fmtNum(o.stats.total);
+  applyHeader(o);
+  countTo($("#t-total"), o.stats.total);
   $("#t-types").textContent = `${o.stats.types.length} ${t("types")}`;
   const last = o.last_sync;
   $("#t-last").textContent = last ? ago(last.time) : t("never");
   $("#t-last-hint").textContent = last ? `${devName(last.device || "")} · ${last.ok ? "+" + fmtNum(last.added) : t("fail")}` : "";
-  $("#t-devices").textContent = o.devices;
-  $("#t-reports").textContent = o.reports;
+  countTo($("#t-devices"), o.devices);
+  countTo($("#t-reports"), o.reports);
+  document.querySelectorAll(".tile").forEach(el => el.classList.remove("loading"));
   barChart($("#activity"), o.activity, { label: p => p.day, value: p => p.records, fail: p => p.fails > 0 });
   types = o.stats.types;
   renderTypes();
+  // show the busiest type straight away, rather than an empty "pick a type"
+  if (!selType && types.length) { selType = types[0].type; renderTypes(); loadDaily(); }
   const outputs = o.outputs.map(x => `${esc(x.kind)}: <code>${esc(x.where)}</code>`).join("<br>");
   $("#server-info").innerHTML = [
     [t("srv.address"), `<code>${esc(o.base_url)}</code>`],
@@ -283,10 +338,15 @@ $("#mcp-on").addEventListener("change", async e => {
   try { await api("/api/mcp", { method: "POST", body: JSON.stringify({ enabled: on }) }); renderMCP(on); }
   catch (err) { e.target.checked = !on; alert(err.message || err); }
 });
-async function loadPairing() {
-  const [p, devs, o] = await Promise.all([api("/api/pair"), api("/api/devices"), api("/api/overview")]);
-  renderPair(p);
+async function loadMCP() {
+  const o = await api("/api/overview");
+  applyHeader(o);
   renderMCP(o.mcp_enabled);
+}
+async function loadPairing() {
+  const [p, devs] = await Promise.all([api("/api/pair"), api("/api/devices")]);
+  renderPair(p);
+  noticeDevices(devs);
   $("#devices tbody").innerHTML = devs.length ? devs.map(d => `<tr>
       <td>${esc(d.name)}${d.revoked ? ` <span class="badge bad">${t("dev.revoked")}</span>` : ""}<div class="muted detail">${esc(d.last_ip)}</div></td>
       <td class="nowrap">${when(d.created)}</td><td class="nowrap">${d.last_seen ? ago(d.last_seen) : "–"}</td>
@@ -295,9 +355,17 @@ async function loadPairing() {
         : `<button class="ghost danger" data-revoke="${d.id}">${t("dev.revoke")}</button>`}</td></tr>`).join("")
     : `<tr><td colspan="4" class="empty">${t("dev.none")}</td></tr>`;
 }
+// noticeDevices says when a phone has just paired (not on the first look).
+function noticeDevices(devs) {
+  const ids = new Set(devs.map(d => d.id));
+  if (knownDevices) for (const d of devs) if (!knownDevices.has(d.id) && d.scope !== "mcp") toast(t("toast.paired", { dev: d.name }));
+  knownDevices = ids;
+}
 function renderPair(p) {
   pairState = p.active || null;
   const pend = p.pending || [];
+  const pc = $("#pending-count");
+  pc.hidden = !pend.length; pc.textContent = pend.length;
   $("#pending").innerHTML = pend.map(x => `<div class="card pending"><div class="row">
       <div><h2>${t("pend.title")}</h2><p class="muted">${esc(x.device)} · ${t("pend.from")} ${esc(x.ip)}</p>${x.confirm ? `<p class="muted">${t("pend.confirm")}</p>` : ""}</div>
       ${x.confirm ? `<div class="confirm-code">${esc(x.confirm)}</div>` : ""}
@@ -473,11 +541,21 @@ document.addEventListener("click", e => {
 // ------------------------------------------------------------------ live refresh
 setInterval(() => {
   if (document.hidden) return;
+  // the overview is cached on the server until records change, so asking is cheap
   if (current === "overview") loadOverview().catch(() => {});
-  if (current === "devices") api("/api/pair").then(p => {
+  else api("/api/overview").then(applyHeader).catch(() => {});
+  api("/api/pair").then(p => {
+    const pend = p.pending || [];
+    if (current !== "devices") {
+      // a phone asking to pair shows on the sidebar, wherever one is
+      const pc = $("#pending-count"); pc.hidden = !pend.length; pc.textContent = pend.length;
+      if (pend.length && !pc.dataset.seen) { pulse(pc); pc.dataset.seen = 1; } else if (!pend.length) delete pc.dataset.seen;
+      return;
+    }
     // only re-render when something changed, so the QR doesn't flicker
-    const key = JSON.stringify([p.active?.code, (p.pending || []).map(x => x.id)]);
-    if (key !== renderPair.key) { renderPair.key = key; renderPair(p); }
+    const key = JSON.stringify([p.active?.code, pend.map(x => x.id)]);
+    if (key !== renderPair.key) { renderPair.key = key; loadPairing().catch(() => {}); }
   }).catch(() => {});
 }, 5000);
+if (!location.hash.startsWith("#overview") && location.hash.length > 1) api("/api/overview").then(applyHeader).catch(() => {});
 show(location.hash.slice(1));

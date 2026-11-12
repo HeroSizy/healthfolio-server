@@ -403,6 +403,7 @@ func (a *App) pairPage(c *ui.Context, pal *palette) {
 	b, _ := a.host.Backend()
 	ui.Scroll(c).Grow(1).MinHeight(0).Children(func() {
 		ui.Column(c).Padding(4, 22, 22, 22).Gap(18).Children(func() {
+			a.pairedCard(c, pal)
 			for _, p := range a.pending {
 				a.pendingCard(c, pal, b, p)
 			}
@@ -430,6 +431,16 @@ func (a *App) pairPage(c *ui.Context, pal *palette) {
 						ui.Text(c, p.Code[:3]+" "+p.Code[3:]).FontSize(34).FontWeight(700).LetterSpacing(4).TextColor(pal.text).Margin(6, 0, 0, 0)
 						ui.Text(c, fmt.Sprintf("%s %d:%02d · %s", a.t("剩余", "Expires in"), int(left.Minutes()), int(left.Seconds())%60, p.URL)).
 							FontSize(12).TextColor(pal.textMuted)
+						// time left as a bar; it steps once a second with the text, no animation
+						// running in between
+						frac := float32(left.Seconds() / (10 * time.Minute).Seconds())
+						ui.Box(c).Height(4).MaxWidth(260).Radius(2).Background(pal.divider).Children(func() {
+							col := pal.accent
+							if left < time.Minute {
+								col = pal.danger
+							}
+							ui.Box(c).Height(4).WidthPercent(100 * max(0, min(1, frac))).Radius(2).Background(col)
+						})
 						ui.Row(c).Gap(8).Children(func() {
 							if ui.Button(c, a.t("复制链接", "Copy link")).Clicked() {
 								a.host.Copy(p.Link)
@@ -449,6 +460,31 @@ func (a *App) pairPage(c *ui.Context, pal *palette) {
 				})
 			})
 			a.devicesSection(c, pal, b)
+		})
+	})
+}
+
+// pairedCard says a phone just paired, for a few seconds, with a check mark that springs in.
+func (a *App) pairedCard(c *ui.Context, pal *palette) {
+	const shown = 8 * time.Second
+	left := shown - time.Since(a.pairedAt)
+	if a.paired == "" || left <= 0 {
+		return
+	}
+	c.After(left) // build again when it should go
+	row := ui.Row(c.Key("paired")).AlignItems(ui.Center).Gap(14).Padding(14, 16).Radius(12).
+		Background(pal.ok.Alpha(0.12)).Border(1, pal.ok.Alpha(0.35)).
+		Transition(ui.ElementTransition{Enter: &ui.Motion{Y: -8, Opacity: 0, Collapse: true}, Exit: &ui.Motion{Opacity: 0, Collapse: true}})
+	row.Children(func() {
+		mark := ui.Column(c).Size(34, 34).Shrink(0).Center().Radius(17).Background(pal.ok)
+		in := mark.AnimateTo("in-"+a.paired+a.pairedAt.String(), 1, ui.Animation{Spring: ui.SpringOptions{Duration: 550 * time.Millisecond, Bounce: 0.35}})
+		mark.Scale(0.4+0.6*in, 0.4+0.6*in).Opacity(min(1, in*1.5))
+		mark.Children(func() {
+			ui.Icon(c, iconCheck).Size(18, 18).TextColor(ui.Hex("#ffffff"))
+		})
+		ui.Column(c).Grow(1).MinWidth(0).Gap(2).Children(func() {
+			ui.Text(c, a.t("已配对 "+a.paired, a.paired+" is paired")).FontSize(14).FontWeight(650).SingleLine()
+			ui.Text(c, a.t("iPhone 会自动开始同步", "The iPhone starts syncing on its own")).FontSize(12).TextColor(pal.textMuted)
 		})
 	})
 }

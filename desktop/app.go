@@ -94,6 +94,13 @@ type App struct {
 
 	toast   string
 	loading sync.Mutex
+
+	// what changed since the last load (noticeChanges)
+	loaded   bool
+	syncKey  string    // the last sync seen
+	pulse    string    // the sync the status light pulses for
+	paired   string    // a phone that just paired
+	pairedAt time.Time // when it did
 }
 
 var dayRanges = []int{7, 30, 365}
@@ -149,6 +156,7 @@ func (a *App) load() {
 		daily, _ = b.Daily(a.selType, dayRanges[a.dayRange])
 	}
 	a.host.Update(func() {
+		a.noticeChanges(ov, devs)
 		a.ov, a.logs, a.devices, a.reports, a.pending, a.daily = ov, logs, devs, reps, pend, daily
 		a.moreLogs = len(logs) == 200
 		a.setPair(pair)
@@ -158,6 +166,51 @@ func (a *App) load() {
 			go a.loadDaily()
 		}
 	})
+}
+
+// noticeChanges compares what just loaded with what showed: a new sync makes the status
+// light pulse once and says so; a phone that paired gets a confirmation on the pairing
+// page. The first load only takes note.
+func (a *App) noticeChanges(ov model.Overview, devs []model.Device) {
+	sync := ""
+	if s := ov.LastSync; s != nil {
+		sync = s.Time + "/" + itoa(s.Received) + "/" + itoa(s.Added)
+	}
+	if a.loaded && sync != "" && sync != a.syncKey && recent(ov.LastSync.Time) {
+		a.pulse = sync
+		if s := ov.LastSync; s.Added > 0 {
+			a.toast = a.t(
+				"收到 "+devLabel(s.Device)+" 的 "+itoa(s.Added)+" 条新数据",
+				itoa(s.Added)+" new records from "+devLabel(s.Device))
+		}
+	}
+	a.syncKey = sync
+	if a.loaded {
+		known := map[int64]bool{}
+		for _, d := range a.devices {
+			known[d.ID] = true
+		}
+		for _, d := range devs {
+			if !known[d.ID] && d.Scope != "mcp" {
+				a.paired, a.pairedAt = d.Name, time.Now()
+			}
+		}
+	}
+	a.loaded = true
+}
+
+// recent is a time in the last two minutes: news worth a toast, not a sync from hours ago
+// found when the window opens again.
+func recent(iso string) bool {
+	t, err := time.Parse(time.RFC3339, iso)
+	return err == nil && time.Since(t) < 2*time.Minute
+}
+
+func devLabel(name string) string {
+	if name == "" {
+		return "iPhone"
+	}
+	return name
 }
 
 func (a *App) loadDaily() {
@@ -207,7 +260,13 @@ func (a *App) View(c *ui.Context) {
 		a.sidebar(c, pal, bar)
 		ui.Column(c).Grow(1).MinWidth(0).Padding(10, 10, 10, 0).DragWindow().Children(func() {
 			card := raised(ui.Column(c).Grow(1).MinHeight(0).Radius(14), pal).Clip()
-			card.Children(func() { a.content(c, pal) })
+			card.Children(func() {
+				// each page rises into place as it opens
+				ui.Column(c.Key("page-" + a.page)).Grow(1).MinHeight(0).Transition(ui.ElementTransition{
+					Enter:     &ui.Motion{Y: 10, Opacity: 0},
+					Animation: &ui.Animation{Duration: 220 * time.Millisecond, Ease: ui.EaseOut},
+				}).Children(func() { a.content(c, pal) })
+			})
 		})
 	})
 }

@@ -9,6 +9,7 @@ package main
 import (
 	"log"
 	"strings"
+	"time"
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
@@ -29,6 +30,19 @@ func main() {
 	app := desktop.New(s, !strings.Contains(frag, "en"))
 	mygo.App.WhenReady(func() {
 		win = mygo.NewWindow(mygo.WindowOptions{Title: "Healthfolio", Width: 1080, Height: 720, Content: ui.View(app.View)})
+		if strings.Contains(frag, "demo") {
+			// a sync arrives after 3 s, and on #pair-demo a phone pairs after 6 s
+			go func() {
+				time.Sleep(3 * time.Second)
+				update(func() { s.SimulateSync(280) })
+				app.Refresh()
+				if strings.Contains(frag, "pair") {
+					time.Sleep(3 * time.Second)
+					update(func() { s.SimulatePair("Zen 的 iPhone") })
+					app.Refresh()
+				}
+			}()
+		}
 		if strings.Contains(frag, "welcome") {
 			app.ShowOnboarding()
 			return

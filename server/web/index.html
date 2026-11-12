@@ -9,30 +9,37 @@
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<header class="top">
+<div class="shell">
+<aside class="side">
   <div class="brand">
     <span class="logo" aria-hidden="true"></span>
-    <div>
-      <h1 id="server-name">Healthfolio</h1>
-      <p class="sub" id="server-sub">&nbsp;</p>
+    <div class="brand-text">
+      <h1>Healthfolio</h1>
+      <p class="sub" id="server-name">&nbsp;</p>
     </div>
   </div>
   <nav class="tabs" role="tablist">
-    <button role="tab" data-tab="overview" data-i18n="tab.overview">Overview</button>
-    <button role="tab" data-tab="history" data-i18n="tab.history">Sync history</button>
-    <button role="tab" data-tab="devices" data-i18n="tab.devices">Pair &amp; devices</button>
-    <button role="tab" data-tab="reports" data-i18n="tab.reports">Checkups</button>
+    <button role="tab" data-tab="overview"><svg viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 5-6"/></svg><span data-i18n="tab.overview">Overview</span></button>
+    <button role="tab" data-tab="history"><svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l3 2"/></svg><span data-i18n="tab.history">Sync history</span></button>
+    <button role="tab" data-tab="devices"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3h-3zM20 14v.01M14 20h.01M17 20h4v-3"/></svg><span data-i18n="tab.devices">Pair &amp; devices</span><b class="count" id="pending-count" hidden></b></button>
+    <button role="tab" data-tab="mcp"><svg viewBox="0 0 24 24"><path d="M12 3l1.9 4.6 4.6 1.9-4.6 1.9L12 16l-1.9-4.6-4.6-1.9 4.6-1.9z"/><path d="M19 15l.8 2.2 2.2.8-2.2.8L19 21l-.8-2.2-2.2-.8 2.2-.8z"/></svg><span data-i18n="tab.mcp">AI assistants</span></button>
+    <button role="tab" data-tab="reports"><svg viewBox="0 0 24 24"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/><path d="M8 14h3l1.5-3 2 6 1.5-3H17"/></svg><span data-i18n="tab.reports">Checkups</span></button>
   </nav>
-</header>
+  <div class="status" id="status">
+    <div class="status-row"><i class="live" id="live"></i><span data-i18n="st.running">Running</span></div>
+    <span class="sub" id="server-sub">&nbsp;</span>
+  </div>
+  <footer><a href="https://github.com/HeroSizy/healthfolio-server" target="_blank" rel="noopener">Healthfolio</a> <span id="ver"></span></footer>
+</aside>
 
 <main>
   <!-- overview -->
   <section id="tab-overview" class="tab">
     <div class="tiles">
-      <div class="tile"><span class="label" data-i18n="ov.records">Records</span><span class="value" id="t-total">–</span><span class="hint" id="t-types"></span></div>
-      <div class="tile"><span class="label" data-i18n="ov.last">Last sync</span><span class="value" id="t-last">–</span><span class="hint" id="t-last-hint"></span></div>
-      <div class="tile"><span class="label" data-i18n="ov.devices">Paired devices</span><span class="value" id="t-devices">–</span><span class="hint"><a href="#devices" data-i18n="ov.pairnew">Pair a new iPhone →</a></span></div>
-      <div class="tile"><span class="label" data-i18n="ov.reports">Checkup reports</span><span class="value" id="t-reports">–</span><span class="hint" id="t-reports-hint"></span></div>
+      <div class="tile loading"><span class="label" data-i18n="ov.records">Records</span><span class="value" id="t-total">–</span><span class="hint" id="t-types"></span></div>
+      <div class="tile loading"><span class="label" data-i18n="ov.last">Last sync</span><span class="value" id="t-last">–</span><span class="hint" id="t-last-hint"></span></div>
+      <div class="tile loading"><span class="label" data-i18n="ov.devices">Paired devices</span><span class="value" id="t-devices">–</span><span class="hint"><a href="#devices" data-i18n="ov.pairnew">Pair a new iPhone →</a></span></div>
+      <div class="tile loading"><span class="label" data-i18n="ov.reports">Checkup reports</span><span class="value" id="t-reports">–</span><span class="hint" id="t-reports-hint"></span></div>
     </div>
 
     <div class="card">
@@ -117,13 +124,16 @@
         <p><code id="token">••••••••</code> <button class="ghost" id="token-show" data-i18n="tok.show">Show</button></p>
       </details>
     </div>
+  </section>
 
+  <!-- AI assistants -->
+  <section id="tab-mcp" class="tab" hidden>
     <div class="card">
       <div class="card-head"><h2 data-i18n="mcp.title">AI assistants (MCP)</h2>
         <label class="switch"><input type="checkbox" id="mcp-on"> <span data-i18n="mcp.on">Allow AI assistants</span></label></div>
       <p class="muted" id="mcp-off" hidden data-i18n="mcp.offHint">Turned off: no assistant can connect. Tokens are kept and work again when you turn it back on.</p>
       <div id="mcp-body">
-      <p class="muted" data-i18n="mcp.hint">Let Claude or another MCP client read your health data (read-only). Create a token for it; you can revoke it above like any device.</p>
+      <p class="muted" data-i18n="mcp.hint">Let Claude or another MCP client read your health data (read-only). Create a token for it; you can revoke it in Pair &amp; devices like any device.</p>
       <p><button class="ghost" id="mcp-token" data-i18n="mcp.create">Create token for an AI assistant</button></p>
       <div id="mcp-setup" hidden>
         <p class="muted" data-i18n="mcp.once">Copy it now, it won't be shown again.</p>
@@ -161,7 +171,8 @@
     </div>
   </section>
 </main>
-<footer><a href="https://github.com/herosizy/healthsync-server" target="_blank" rel="noopener">healthsync-server</a> <span id="ver"></span></footer>
+</div>
+<div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
 <script src="app.js"></script>
 </body>
 </html>

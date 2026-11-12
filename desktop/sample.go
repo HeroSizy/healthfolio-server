@@ -17,6 +17,22 @@ type Sample struct {
 
 	manualUpdates bool
 	mcpOff        bool
+
+	lastSync *model.LogEntry // set by SimulateSync
+	extra    int             // records added by SimulateSync
+}
+
+// SimulateSync makes a sync arrive, for checking the animations in the preview.
+func (s *Sample) SimulateSync(added int) {
+	s.lastSync = &model.LogEntry{Time: time.Now().Format(time.RFC3339), Kind: "ingest", Device: "iPhone", OK: true, Received: added + 12, Added: added}
+	s.extra += added
+}
+
+// SimulatePair makes a phone pair (preview only).
+func (s *Sample) SimulatePair(name string) {
+	now := time.Now().Format(time.RFC3339)
+	s.devices = append([]model.Device{{ID: int64(len(s.devices) + 10), Name: name, Created: now, LastSeen: now, LastIP: "192.168.1.55", Scope: "device"}}, s.devices...)
+	s.pair = nil
 }
 
 func NewSample(update func(func())) *Sample {
@@ -40,10 +56,14 @@ func (s *Sample) Overview() model.Overview {
 	}
 	act[11].Added, act[11].Fails = 0, 2
 	last := model.LogEntry{Time: now.Add(-3 * time.Minute).Format(time.RFC3339), Kind: "ingest", Device: "iPhone", OK: true, Received: 412, Added: 388}
+	if s.lastSync != nil {
+		last = *s.lastSync
+		act[29].Records += s.extra
+	}
 	return model.Overview{
 		Name: "Home server", Version: "0.0.15", Protocol: 2, OS: "mac", BaseURL: "http://192.168.1.10:8787", TailscaleURL: "http://100.101.102.103:8787", MCPURL: "http://192.168.1.10:8787/mcp",
 		DataDir: "~/Library/Application Support/HealthSync", Outputs: []model.Output{{Kind: "sqlite", Where: "health.db"}},
-		Stats: model.Stats{Total: 184_327, Types: []model.TypeStat{
+		Stats: model.Stats{Total: 184_327 + s.extra, Types: []model.TypeStat{
 			{Type: "HKQuantityTypeIdentifierHeartRate", Count: 96_210}, {Type: "HKQuantityTypeIdentifierActiveEnergyBurned", Count: 41_088},
 			{Type: "HKQuantityTypeIdentifierStepCount", Count: 22_431}, {Type: "HKQuantityTypeIdentifierDistanceWalkingRunning", Count: 18_920},
 			{Type: "HKCategoryTypeIdentifierSleepAnalysis", Count: 3_102}, {Type: "HKQuantityTypeIdentifierRestingHeartRate", Count: 812},
