@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 
@@ -29,7 +30,21 @@ type DB struct {
 	onLog func(LogEntry)
 	// compacted is closed when the background compaction after opening is done
 	compacted chan struct{}
+
+	// Stats reads every record (≈0.4 s for 840k of them) and the window and the dashboard
+	// ask for it every 5 seconds, so it is kept until records change.
+	statsMu  sync.Mutex
+	stats    *Stats
+	statsGen uint64
+	statsAt  time.Time
+	gen      atomic.Uint64 // bumped whenever records change
 }
+
+// statsMaxAge also refreshes the counts now and then, in case another program wrote to
+// health.db.
+const statsMaxAge = 10 * time.Minute
+
+func (d *DB) recordsChanged() { d.gen.Add(1) }
 
 const schema = `
 CREATE TABLE IF NOT EXISTS records (
@@ -370,7 +385,11 @@ func (d *DB) InsertRecords(rows []Record) (added, deleted int, err error) {
 			}
 		}
 	}
-	return added, deleted, tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return 0, 0, err
+	}
+	d.recordsChanged()
+	return added, deleted, nil
 }
 
 // nullable stores "" as NULL, so that "no uuid" never collides in the uuid index.
@@ -561,6 +580,30 @@ type Stats = model.Stats
 
 // Stats counts the samples that are not deleted, per type.
 func (d *DB) Stats() (Stats, error) {
+	d.statsMu.Lock() // one count at a time; the others wait for its result
+	defer d.statsMu.Unlock()
+	gen := d.gen.Load()
+	if d.stats != nil && d.statsGen == gen && time.Since(d.statsAt) < statsMaxAge {
+		return cloneStats(*d.stats), nil
+	}
+	s, err := d.countStats()
+	if err == nil {
+		kept := cloneStats(s)
+		d.stats, d.statsGen, d.statsAt = &kept, gen, time.Now()
+	}
+	return s, err
+}
+
+func cloneStats(s Stats) Stats {
+	s.Types = append([]TypeStat{}, s.Types...)
+	if s.LastReceived != nil {
+		v := *s.LastReceived
+		s.LastReceived = &v
+	}
+	return s
+}
+
+func (d *DB) countStats() (Stats, error) {
 	s := Stats{Types: []TypeStat{}}
 	rows, err := d.sql.Query(`SELECT type, COUNT(*), MAX(start) FROM records WHERE deleted_at IS NULL GROUP BY type ORDER BY 2 DESC`)
 	if err != nil {
@@ -842,7 +885,7 @@ func (d *DB) RevokeDevice(id int64) error {
 
 // RenameDevice changes the name shown for a paired device. Its token stays the same.
 func (d *DB) RenameDevice(id int64, name string) error {
-	name = strings.TrimSpace(name)
+	name = cleanName(name)
 	if name == "" || utf8.RuneCountInString(name) > 64 {
 		return fmt.Errorf("a device name needs 1 to 64 characters")
 	}

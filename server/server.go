@@ -343,15 +343,25 @@ func (s *Server) admin(next http.HandlerFunc) http.HandlerFunc {
 				return
 			}
 		}
-		if r.Method != http.MethodGet && r.Header.Get("X-HealthSync") != "1" {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead && r.Header.Get("X-HealthSync") != "1" {
 			errJSON(w, http.StatusForbidden, "missing X-HealthSync header")
 			return
 		}
-		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("X-Frame-Options", "SAMEORIGIN") // the PDF viewer frames the originals
 		w.Header().Set("Referrer-Policy", "no-referrer")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("Content-Security-Policy", dashboardCSP)
 		next(w, r)
 	}
 }
+
+// dashboardCSP lets the dashboard run its own script and pdf.js from cdnjs (hash-checked),
+// and nothing else: text from the phone that ever slipped into the page unescaped could
+// not run, load or send anything.
+const dashboardCSP = "default-src 'self'; script-src 'self' https://cdnjs.cloudflare.com; " +
+	"connect-src 'self' https://cdnjs.cloudflare.com; worker-src blob:; style-src 'self' 'unsafe-inline'; " +
+	"img-src 'self' data: blob:; font-src 'self' data: blob:; frame-src 'self'; object-src 'none'; " +
+	"base-uri 'none'; form-action 'self'; frame-ancestors 'self'"
 
 func isLoopback(ip string) bool {
 	a, err := netip.ParseAddr(ip)
@@ -710,7 +720,7 @@ type pairRequest struct {
 func readPairRequest(r *http.Request) pairRequest {
 	var req pairRequest
 	_ = json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&req)
-	req.Device = strings.TrimSpace(req.Device)
+	req.Device = cleanName(req.Device)
 	if req.Device == "" {
 		req.Device = "iPhone"
 	}
@@ -722,6 +732,23 @@ func readPairRequest(r *http.Request) pairRequest {
 		req.DeviceID = req.DeviceID[:128]
 	}
 	return req
+}
+
+// cleanName is a device name as people should see it. Anyone on the network may ask to
+// pair, and the name they send is shown in the "allow?" dialog: line breaks could fake
+// more lines of that dialog, and direction overrides could show the text reversed.
+func cleanName(s string) string {
+	s = strings.Map(func(r rune) rune {
+		switch {
+		case r == '\n' || r == '\r' || r == '\t':
+			return ' '
+		case r < 32 || r == 0x7f || (r >= 0x80 && r < 0xa0),
+			r >= 0x200b && r <= 0x200f, r >= 0x202a && r <= 0x202e, r >= 0x2066 && r <= 0x2069, r == 0xfeff:
+			return -1
+		}
+		return r
+	}, s)
+	return strings.Join(strings.Fields(s), " ")
 }
 
 // issue makes a token for a phone that may pair and answers with it.
@@ -953,9 +980,12 @@ func (s *Server) apiNewDevice(w http.ResponseWriter, r *http.Request) {
 		Name string `json:"name"`
 	}
 	_ = json.NewDecoder(io.LimitReader(r.Body, 1024)).Decode(&req)
-	name := strings.TrimSpace(req.Name)
+	name := cleanName(req.Name)
 	if name == "" {
 		name = "AI assistant"
+	}
+	if rr := []rune(name); len(rr) > 80 {
+		name = string(rr[:80])
 	}
 	tok := newToken()
 	if _, _, err := s.db.AddDevice(name, tok, clientIP(r), "", scopeMCP); err != nil {

@@ -28,8 +28,12 @@ func Advertise(name string, port int) (stop func()) {
 			// dns-sd outlives a server that is killed or crashes, and keeps advertising a
 			// port nothing listens on; the phone may then pick that stale entry. So it runs
 			// under a shell that stops it when our end of its stdin closes, which happens
-			// however this process ends.
-			script := `"$0" "$@" & d=$!; trap 'kill $d 2>/dev/null' EXIT; read -r _`
+			// however this process ends. Should the shell itself be killed outright, a
+			// watcher still stops dns-sd once this process is gone (stale "Mac mini (2)"
+			// entries on port 8799 were seen outliving their servers for days).
+			script := `"$0" "$@" & d=$!; p=$PPID; ` +
+				`( while kill -0 $p 2>/dev/null; do sleep 30; done; kill $d 2>/dev/null ) & w=$!; ` +
+				`trap 'kill $d $w 2>/dev/null' EXIT; trap 'exit 1' HUP INT TERM; read -r _`
 			cmd := exec.Command("/bin/sh", append([]string{"-c", script, "/usr/bin/dns-sd"}, append(args, txt...)...)...)
 			stdin, err := cmd.StdinPipe()
 			if err == nil {

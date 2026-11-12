@@ -11,11 +11,14 @@ package server
 
 import (
 	"bufio"
+	"context"
 	"database/sql"
+	"database/sql/driver"
 	"encoding/json"
 	"fmt"
 	"github.com/herosizy/healthsync-server/model"
 	"io"
+	"modernc.org/sqlite"
 	"net/http"
 	"net/url"
 	"os"
@@ -278,17 +281,114 @@ func (m *MCP) call(name string, a map[string]any) (any, error) {
 		if !(strings.HasPrefix(low, "select") || strings.HasPrefix(low, "with")) || strings.Contains(s, ";") {
 			return nil, fmt.Errorf("only a single SELECT statement is allowed")
 		}
-		return m.rows(`SELECT * FROM (` + s + `) LIMIT 1000`)
+		return m.userQuery(`SELECT * FROM (` + s + `) LIMIT 1000`)
 	}
 	return nil, fmt.Errorf("unknown tool %q", name)
 }
 
+// queryTimeout bounds every query an AI assistant starts: a cross join over the records
+// table would otherwise keep a CPU core busy for hours.
+const queryTimeout = 15 * time.Second
+
 func (m *MCP) rows(q string, args ...any) ([]map[string]any, error) {
-	rs, err := m.db.Query(q, args...)
+	ctx, cancel := context.WithTimeout(context.Background(), queryTimeout)
+	defer cancel()
+	rs, err := m.db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, timeoutErr(ctx, err)
+	}
+	defer rs.Close()
+	out, err := scanRows(rs)
+	return out, timeoutErr(ctx, err)
+}
+
+func timeoutErr(ctx context.Context, err error) error {
+	if err != nil && ctx.Err() == context.DeadlineExceeded {
+		return fmt.Errorf("the query took longer than %d seconds and was stopped; narrow it down (a time range, a type, fewer joins)", int(queryTimeout.Seconds()))
+	}
+	return err
+}
+
+// hiddenTables hold the server's own bookkeeping, not health data: the paired devices (with
+// their token hashes and addresses) and the server's preferences. query_sql may not read them.
+var hiddenTables = map[string]bool{"devices": true, "prefs": true}
+
+// sqlPolicy is the SQLite authorizer for query_sql: reading and computing only, nothing
+// from hiddenTables, no client addresses from sync_log, and no functions that touch
+// anything outside the database.
+func sqlPolicy(action sqlite.AuthorizerActionCode, arg1, arg2, _, _ string) sqlite.AuthorizerReturnCode {
+	switch action {
+	case sqlite.AuthSelect, sqlite.AuthRecursive:
+		return sqlite.AuthorizerOK
+	case sqlite.AuthRead:
+		t := strings.ToLower(arg1)
+		if hiddenTables[t] {
+			return sqlite.AuthorizerDeny
+		}
+		if t == "sync_log" && strings.EqualFold(arg2, "ip") {
+			return sqlite.AuthorizerIgnore // reads as NULL
+		}
+		return sqlite.AuthorizerOK
+	case sqlite.AuthFunction:
+		switch strings.ToLower(arg2) {
+		case "load_extension", "readfile", "writefile", "edit", "fts3_tokenizer", "sqlite_offset":
+			return sqlite.AuthorizerDeny
+		}
+		return sqlite.AuthorizerOK
+	case sqlite.AuthPragma:
+		switch strings.ToLower(arg1) {
+		case "table_info", "table_xinfo", "table_list", "index_list", "index_info", "index_xinfo", "foreign_key_list":
+			if hiddenTables[strings.ToLower(arg2)] {
+				return sqlite.AuthorizerDeny
+			}
+			return sqlite.AuthorizerOK
+		}
+	}
+	return sqlite.AuthorizerDeny
+}
+
+// userQuery runs SQL written by an AI assistant on its own connection, under sqlPolicy and
+// queryTimeout.
+func (m *MCP) userQuery(q string) ([]map[string]any, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), queryTimeout)
+	defer cancel()
+	conn, err := m.db.Conn(ctx)
 	if err != nil {
 		return nil, err
 	}
+	defer conn.Close()
+	setAuth := func(fn sqlite.AuthorizerFn) error {
+		return conn.Raw(func(dc any) error {
+			r, ok := dc.(sqlite.AuthorizerRegisterer)
+			if !ok {
+				return fmt.Errorf("the SQLite driver cannot restrict queries")
+			}
+			return r.RegisterAuthorizer(fn)
+		})
+	}
+	if err := setAuth(sqlPolicy); err != nil {
+		return nil, err
+	}
+	// the connection goes back to the pool afterwards: take the policy off again, or drop
+	// the connection if that fails
+	defer func() {
+		if setAuth(nil) != nil {
+			_ = conn.Raw(func(any) error { return driver.ErrBadConn })
+		}
+	}()
+	rs, err := conn.QueryContext(ctx, q)
+	if err != nil {
+		if strings.Contains(err.Error(), "not authorized") {
+			return nil, fmt.Errorf("not allowed: query_sql reads the health tables and views only (records, daily, checkup, reports, sync_log and the v_* views)")
+		}
+		return nil, timeoutErr(ctx, err)
+	}
 	defer rs.Close()
+	out, err := scanRows(rs)
+	return out, timeoutErr(ctx, err)
+}
+
+func scanRows(rs *sql.Rows) ([]map[string]any, error) {
 	cols, _ := rs.Columns()
 	out := []map[string]any{}
 	for rs.Next() {
@@ -472,7 +572,7 @@ func (s *Server) handleMCPToken(w http.ResponseWriter, r *http.Request) {
 		Name string `json:"name"`
 	}
 	_ = json.NewDecoder(io.LimitReader(r.Body, 1024)).Decode(&req)
-	name := strings.TrimSpace(req.Name)
+	name := cleanName(req.Name)
 	if name == "" {
 		name = "AI assistant"
 	}

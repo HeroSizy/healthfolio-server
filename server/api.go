@@ -63,7 +63,7 @@ func Start(cfg *Config, onEvent func(model.LogEntry)) (*Instance, error) {
 		return nil, err
 	}
 	in := &Instance{Cfg: cfg, srv: srv, db: db, Token: token, stop: func() {}, done: make(chan error, 1),
-		hs: &http.Server{Handler: srv, ReadHeaderTimeout: 10 * time.Second}}
+		hs: &http.Server{Handler: srv, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute, MaxHeaderBytes: 64 << 10}}
 	logf("healthsync-server %s listening on %s, data in %s", version, addr, cfg.DataDir)
 	go TailscaleAddr() // look it up now rather than in the first request
 	if !cfg.NoBonjour {

@@ -401,7 +401,10 @@ async function showItem(i) {
   document.querySelectorAll("#rd-items tbody tr").forEach(tr => tr.classList.toggle("sel", +tr.dataset.item === i));
   history.replaceState(null, "", `#reports/${encodeURIComponent(repDetail.report.id)}/${i}`);
   const box = $("#rd-page");
-  const loc = it.location;
+  // the location comes from the phone as sent: only numbers go into styles and URLs
+  const num = v => (Number.isFinite(+v) ? +v : 0);
+  const loc = it.location && { file: String(it.location.file ?? ""), page: Math.max(0, Math.floor(num(it.location.page))),
+    x: num(it.location.x), y: num(it.location.y), w: num(it.location.w), h: num(it.location.h) };
   if (!loc) { box.innerHTML = `<p class="empty">${t("rd.noloc")}</p>`; return; }
   const file = repDetail.files.find(f => f.name === loc.file);
   if (!file) { box.innerHTML = `<p class="empty">${t("rd.missing", { name: esc(loc.file) })}</p>`; return; }
@@ -419,7 +422,7 @@ async function showItem(i) {
   box.innerHTML = `${caption}<p class="empty">…</p>`;
   try {
     pdfLib = pdfLib || await loadPDFJS();
-    const doc = pdfDocs[url] || (pdfDocs[url] = await pdfLib.getDocument(url).promise);
+    const doc = pdfDocs[url] || (pdfDocs[url] = await pdfLib.getDocument({ url, isEvalSupported: false }).promise);
     const page = await doc.getPage(loc.page + 1);
     const vp1 = page.getViewport({ scale: 1 });
     const scale = Math.min(3, Math.max(1, (box.clientWidth * devicePixelRatio) / vp1.width));
@@ -437,13 +440,23 @@ async function showItem(i) {
 }
 
 // pdf.js draws the PDF page, so the frame can sit on the item's row.
+// pdf.js 3.11 runs font code through eval unless told not to (CVE-2024-4367): getDocument
+// passes isEvalSupported: false. Both files are checked against their known hashes.
+const PDFJS = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/";
+const PDFJS_SRI = "sha384-/1qUCSGwTur9vjf/z9lmu/eCUYbpOTgSjmpbMQZ1/CtX2v/WcAIKqRv+U1DUCG6e";
+const PDFJS_WORKER_SRI = "sha384-SnzOobpRMLXZ52iJvZm/C0fYw0OQemTXzTjIsdsfMcrCtCEe9qgzxTd3RSklO5x2";
 function loadPDFJS() {
   return new Promise((ok, fail) => {
     const s = document.createElement("script");
-    s.src = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
-    s.onload = () => {
-      window.pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
-      ok(window.pdfjsLib);
+    s.src = PDFJS + "pdf.min.js";
+    s.integrity = PDFJS_SRI;
+    s.crossOrigin = "anonymous";
+    s.onload = async () => {
+      try {
+        const res = await fetch(PDFJS + "pdf.worker.min.js", { integrity: PDFJS_WORKER_SRI, mode: "cors" });
+        window.pdfjsLib.GlobalWorkerOptions.workerSrc = URL.createObjectURL(await res.blob());
+        ok(window.pdfjsLib);
+      } catch (err) { fail(err); }
     };
     s.onerror = fail;
     document.head.appendChild(s);
