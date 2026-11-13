@@ -7,7 +7,10 @@ cd "$(dirname "$0")/.."
 out=server/webapp
 GOOS=js GOARCH=wasm go build -trimpath -tags mygo_noinspector \
 	-ldflags "-s -w -X github.com/egoist/mygo.production=1" -o "$out/app.wasm" ./cmd/healthfolio-web
-gzip -9 -n -f "$out/app.wasm"
+# through a pipe: no file name or time in the archive, and BusyBox's gzip (the Docker
+# build's) takes it too
+gzip -9 -c <"$out/app.wasm" >"$out/app.wasm.gz"
+rm "$out/app.wasm"
 cp -f "$(go env GOROOT)/lib/wasm/wasm_exec.js" "$out/wasm_exec.js"
 chmod 644 "$out/wasm_exec.js"
 ls -l "$out"
