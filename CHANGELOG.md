@@ -3,6 +3,23 @@
 Releases happen on their own: bump `version` in mygo.json, add its section here, push to
 main. The desktop app shows the section of a new version in its update window.
 
+## 0.0.18
+
+- The web dashboard is now the app's own window, written in Go and running in the browser
+  (about 5 MB the first time, cached after that). On a phone the pages become tabs along
+  the top. The previous HTML dashboard stays at `/lite/`.
+- AI assistants' `query_sql` reads only the health tables and views (not the paired
+  devices or the server's settings), and every AI query stops after 15 seconds.
+- The web dashboard is hardened: a content security policy, and the PDF viewer checks its
+  files and no longer runs code from fonts in a PDF (CVE-2024-4367).
+- A device's name in the "allow pairing?" dialog can no longer add fake lines.
+- With the window open, the overview no longer counts every record every 5 seconds: it
+  uses about no CPU between syncs.
+- A sync arriving makes the status light glow once and says how many records came; a phone
+  that pairs gets a check mark; pages fade in; the pairing code shows the time it has left.
+- The Bonjour advertisement stops with the server even if it is killed outright, so the
+  iPhone no longer finds servers that have gone.
+
 ## 0.0.17
 
 - The icon gets a small server badge, so the computer's app is easy to tell from the
