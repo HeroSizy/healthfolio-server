@@ -156,7 +156,10 @@ jobs:
           MYGO_LDFLAGS: >-
             -X github.com/herosizy/healthsync-server/server.version=${{ needs.prepare.outputs.version }}
             -X github.com/herosizy/healthsync-server/internal/telemetry.dsn=${{ env.SENTRY_DSN }}
-        run: go tool mygo build -platform "${{ matrix.platform }}" -upload
+        # first the WebAssembly dashboard that the app's server embeds (server/webapp)
+        run: |
+          sh scripts/build-web.sh
+          go tool mygo build -platform "${{ matrix.platform }}" -upload
 
   publish:
     needs: [prepare, binaries, docker, desktop]

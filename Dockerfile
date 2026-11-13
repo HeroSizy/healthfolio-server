@@ -5,6 +5,8 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
+# the web dashboard (WebAssembly) that the server embeds; the same for every platform
+RUN sh scripts/build-web.sh
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags "-s -w -X github.com/herosizy/healthsync-server/server.version=$VERSION -X github.com/herosizy/healthsync-server/internal/telemetry.dsn=$SENTRY_DSN" -o /out/healthsync-server .
 
 FROM alpine:3.22

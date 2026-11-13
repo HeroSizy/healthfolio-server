@@ -29,7 +29,7 @@ func (a *App) decideOnboarding() {
 		return
 	}
 	a.ob.checked = true
-	a.ob.show = !a.host.Settings().Onboarded && len(a.devices) == 0 && a.ov.Stats.Total == 0
+	a.ob.show = !a.web && !a.host.Settings().Onboarded && len(a.devices) == 0 && a.ov.Stats.Total == 0
 }
 
 // ShowOnboarding opens the steps again (the preview's #welcome).

@@ -29,7 +29,7 @@ func (a *App) settingsPage(c *ui.Context, pal *palette) {
 	f := &a.form
 	changed := false
 	ui.Scroll(c).Grow(1).MinHeight(0).Children(func() {
-		ui.Column(c).Padding(4, 22, 22, 22).Gap(18).Children(func() {
+		ui.Column(c).Padding(4, a.gutter(), 22, a.gutter()).Gap(18).Children(func() {
 			if a.saveErr != "" {
 				ui.Text(c, a.saveErr).FontSize(12).TextColor(pal.danger).Padding(10, 12).Radius(8).Background(pal.dangerSoft)
 			}

@@ -75,10 +75,80 @@ func (a *App) sidebar(c *ui.Context, pal *palette, bar ui.TitleBar) {
 		}
 		ui.Spacer(c)
 		a.status(c, pal)
+		if a.web {
+			// the server's settings change on the computer running it, not from a browser
+			a.liteLink(c, pal)
+			return
+		}
 		ui.Box(c).Height(6)
 		a.navRow(c, pal, settingsNav)
 		a.updateChip(c, pal)
 	})
+}
+
+// topBar is the sidebar of a narrow window: the brand and the status light, then the pages
+// as pills that scroll sideways.
+func (a *App) topBar(c *ui.Context, pal *palette) {
+	ui.Column(c).Shrink(0).Gap(8).Padding(12, 12, 10, 12).Children(func() {
+		ui.Row(c).AlignItems(ui.Center).Gap(10).Children(func() {
+			ui.Image(c, appIcon).Size(28, 28).Radius(7).Shadow(0, 2, 6, 0, pal.accent.Alpha(0.3))
+			ui.Column(c).Grow(1).MinWidth(0).Children(func() {
+				ui.Text(c, "Healthfolio").FontSize(14).FontWeight(650).TextColor(pal.text)
+				ui.Text(c, a.ov.Name).FontSize(11).TextColor(pal.textMuted).SingleLine()
+			})
+			b, _ := a.host.Backend()
+			ui.Row(c).AlignItems(ui.Center).Gap(6).Padding(5, 10).Radius(10).Background(pal.chip).Children(func() {
+				a.statusDot(c, pal, b != nil)
+				ui.Text(c, a.t("运行中", "Running")).FontSize(12).FontWeight(600).TextColor(pal.text)
+			})
+		})
+		ui.ScrollHorizontal(c).Scrollbars(false).Children(func() {
+			ui.Row(c).Gap(4).Children(func() {
+				for _, it := range a.nav() {
+					sel := a.page == it.id
+					r := ui.ButtonBase(c.Key("top-"+it.id)).Height(32).Padding(0, 12).Radius(16).AlignItems(ui.Center).Gap(6).
+						Label(a.t(it.zh, it.en)).Transition(ui.ElementTransition{Colors: true, Duration: 160 * time.Millisecond})
+					if sel {
+						r.Background(pal.rowSelected).Border(1, pal.rowBorder)
+					}
+					r.Children(func() {
+						fg := pal.textMuted
+						if sel {
+							fg = pal.accent
+						}
+						ui.Icon(c, it.icon).Size(14, 14).TextColor(fg)
+						ui.Text(c, a.t(it.zh, it.en)).FontSize(13).FontWeight(map[bool]int{true: 600, false: 500}[sel]).TextColor(pal.text).SingleLine()
+						if it.id == "pair" && len(a.pending) > 0 {
+							ui.Text(c, strconv.Itoa(len(a.pending))).FontSize(11).FontWeight(600).TextColor(ui.Hex("#ffffff")).
+								Padding(1, 6).Radius(8).Background(pal.accent)
+						}
+					})
+					if r.Clicked() && !sel {
+						a.page = it.id
+						a.Refresh()
+					}
+				}
+			})
+		})
+	})
+}
+
+// liteLink, at the bottom of the web dashboard's sidebar, opens the plain HTML dashboard,
+// which loads at once and works in any browser.
+func (a *App) liteLink(c *ui.Context, pal *palette) {
+	ui.Box(c).Height(6)
+	r := ui.ButtonBase(c.Key("lite")).Padding(6, 10).Radius(8).Label(a.t("简洁版面板", "Lite dashboard"))
+	if r.Hovered() {
+		r.Background(pal.rowHover)
+	}
+	r.Children(func() {
+		ui.Text(c, a.t("简洁版面板 ↗", "Lite dashboard ↗")).FontSize(12).TextColor(pal.textMuted)
+	})
+	if r.Clicked() {
+		if b, _ := a.host.Backend(); b != nil {
+			a.host.OpenURL(strings.TrimSuffix(b.DashboardURL(), "/") + "/lite/")
+		}
+	}
 }
 
 // updateChip, at the bottom left of the window, says a newer version is out; clicking it
@@ -143,28 +213,37 @@ func (a *App) navRow(c *ui.Context, pal *palette, it navItem) {
 	}
 }
 
+// statusDot is the status light: green with a still glow while the server runs.
+func (a *App) statusDot(c *ui.Context, pal *palette, running bool) {
+	dot := pal.ok
+	if !running {
+		dot = pal.danger
+	}
+	d := ui.Box(c).Size(8, 8).Radius(4).Background(dot)
+	if !running {
+		return
+	}
+	// A still glow: a looping animation redraws the window 60 times a second for as long
+	// as the app runs, which kept a CPU core 40% busy. It swells once when a sync arrives,
+	// and is still again 1.6 s later.
+	glow := float32(0)
+	if a.pulse != "" {
+		p := d.AnimateTo("pulse"+a.pulse, 1, ui.Animation{Duration: 1600 * time.Millisecond, Ease: ui.EaseOut})
+		glow = float32(math.Sin(float64(p) * math.Pi))
+	}
+	d.Shadow(0, 0, 6+16*glow, 2+8*glow, dot.Alpha(0.45+0.3*glow))
+}
+
 // status shows whether the server runs, and where phones reach it.
 func (a *App) status(c *ui.Context, pal *palette) {
 	b, why := a.host.Backend()
 	ui.Column(c).Gap(4).Padding(10, 10).Radius(10).Background(pal.chip).Children(func() {
 		ui.Row(c).AlignItems(ui.Center).Gap(7).Children(func() {
-			dot := pal.ok
 			label := a.t("运行中", "Running")
 			if b == nil {
-				dot, label = pal.danger, a.t("已停止", "Stopped")
+				label = a.t("已停止", "Stopped")
 			}
-			d := ui.Box(c).Size(8, 8).Radius(4).Background(dot)
-			if b != nil {
-				// A still glow: a looping animation redraws the window 60 times a second
-				// for as long as the app runs, which kept a CPU core 40% busy. It swells
-				// once when a sync arrives, and is still again 1.6 s later.
-				glow := float32(0)
-				if a.pulse != "" {
-					p := d.AnimateTo("pulse"+a.pulse, 1, ui.Animation{Duration: 1600 * time.Millisecond, Ease: ui.EaseOut})
-					glow = float32(math.Sin(float64(p) * math.Pi))
-				}
-				d.Shadow(0, 0, 6+16*glow, 2+8*glow, dot.Alpha(0.45+0.3*glow))
-			}
+			a.statusDot(c, pal, b != nil)
 			ui.Text(c, label).FontSize(12).FontWeight(600).TextColor(pal.text)
 		})
 		sub := a.ov.BaseURL

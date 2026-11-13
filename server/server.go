@@ -179,9 +179,19 @@ func (s *Server) routes() {
 	m.HandleFunc("POST /api/mcp", s.admin(s.apiSetMCP))
 
 	// dashboard
+	// dashboard: the desktop app's window compiled to WebAssembly at / (when the build
+	// has it, see webapp.go), and the plain HTML one at /lite/
 	sub, _ := fs.Sub(webFS, "web")
 	static := http.FileServer(http.FS(sub))
+	lite := http.StripPrefix("/lite", static)
+	m.Handle("GET /lite/", s.admin(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-cache")
+		lite.ServeHTTP(w, r)
+	}))
 	m.Handle("GET /", s.admin(func(w http.ResponseWriter, r *http.Request) {
+		if serveWebApp(w, r) {
+			return
+		}
 		w.Header().Set("Cache-Control", "no-cache")
 		static.ServeHTTP(w, r)
 	}))
@@ -358,7 +368,7 @@ func (s *Server) admin(next http.HandlerFunc) http.HandlerFunc {
 // dashboardCSP lets the dashboard run its own script and pdf.js from cdnjs (hash-checked),
 // and nothing else: text from the phone that ever slipped into the page unescaped could
 // not run, load or send anything.
-const dashboardCSP = "default-src 'self'; script-src 'self' https://cdnjs.cloudflare.com; " +
+const dashboardCSP = "default-src 'self'; script-src 'self' 'wasm-unsafe-eval' https://cdnjs.cloudflare.com; " +
 	"connect-src 'self' https://cdnjs.cloudflare.com; worker-src blob:; style-src 'self' 'unsafe-inline'; " +
 	"img-src 'self' data: blob:; font-src 'self' data: blob:; frame-src 'self'; object-src 'none'; " +
 	"base-uri 'none'; form-action 'self'; frame-ancestors 'self'"

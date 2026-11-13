@@ -13,6 +13,8 @@ if [ "$1" = -n ]; then
 fi
 out=dist/dev/HealthSync
 mkdir -p dist/dev
+# the web dashboard the server embeds, built once (scripts/build-web.sh rebuilds it)
+[ -f server/webapp/app.wasm.gz ] || sh scripts/build-web.sh >/dev/null
 go build -o "$out" ./cmd/healthsync
 if [ "$(uname)" = Darwin ]; then
 	names='s/^ *[0-9]*) [0-9A-F]* "\(.*\)".*$/\1/p'

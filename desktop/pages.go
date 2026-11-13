@@ -19,7 +19,7 @@ func (a *App) overviewPage(c *ui.Context, pal *palette) {
 	o := a.ov
 	a.header(c, pal, a.t("概览", "Overview"), a.t("iPhone 同步到这台电脑的健康数据", "Health data your iPhone syncs to this computer"), nil)
 	ui.Scroll(c).Grow(1).MinHeight(0).Children(func() {
-		ui.Column(c).Padding(4, 22, 22, 22).Gap(16).Children(func() {
+		ui.Column(c).Padding(4, a.gutter(), 22, a.gutter()).Gap(16).Children(func() {
 			// tiles
 			// two rows of two when the window is narrow, so the numbers are never cut short
 			ui.Row(c).Gap(12).Wrap().Children(func() {
@@ -46,11 +46,18 @@ func (a *App) overviewPage(c *ui.Context, pal *palette) {
 				a.activityChart(c, pal, o.Activity)
 			})
 			// types + daily chart
-			ui.Row(c).Gap(16).AlignItems(ui.Stretch).Children(func() {
-				ui.Column(c).Grow(1).Basis(0).MinWidth(0).Children(func() {
+			// side by side, or one above the other in a narrow window
+			pair := ui.Row(c).Gap(16).AlignItems(ui.Stretch)
+			half := func(grow float32) ui.Element { return ui.Column(c).Grow(grow).Basis(0).MinWidth(0) }
+			if a.narrow {
+				pair = ui.Column(c).Gap(16)
+				half = func(float32) ui.Element { return ui.Column(c).MinWidth(0) }
+			}
+			pair.Children(func() {
+				half(1).Children(func() {
 					a.section(c, pal, a.t("数据类型", "Data types"), "", nil, func() { a.typesList(c, pal) })
 				})
-				ui.Column(c).Grow(1.4).Basis(0).MinWidth(0).Children(func() {
+				half(1.4).Children(func() {
 					title := a.t("选择一个类型", "Pick a type")
 					unit := ""
 					if a.selType != "" {
@@ -128,7 +135,7 @@ func bytesLabel(n int64) string {
 
 // tile is a number with its label, rising in as the page opens.
 func (a *App) tile(c *ui.Context, pal *palette, key, label, value, hint string, i int) {
-	t := ui.Column(c.Key(key)).Grow(1).Basis(170).MinWidth(0).Gap(3).Padding(14, 16).Radius(12).Background(pal.inset)
+	t := ui.Column(c.Key(key)).Grow(1).Basis(a.tileBasis()).MinWidth(0).Gap(3).Padding(14, 16).Radius(12).Background(pal.inset)
 	appear := t.AnimateTo("in", 1, ui.Animation{Spring: ui.SpringOptions{Duration: 450 * time.Millisecond, Bounce: 0.2}, Delay: time.Duration(i) * 60 * time.Millisecond})
 	t.Opacity(appear).Translate(0, (1-appear)*8)
 	t.Children(func() {
@@ -204,7 +211,13 @@ func (a *App) barChart(c *ui.Context, pal *palette, key string, labels []string,
 	if hi <= 0 {
 		hi = 1
 	}
-	x := chart.NewBand(labels...).Padding(0.28, 0.1)
+	// a few days of data must not make a few wide slabs: under 14 bars, each is as wide as
+	// one of 14 would be, with the rest of its band as room
+	inner := float32(0.28)
+	if n := len(labels); n > 0 && n < 14 {
+		inner = 1 - (1-0.28)*float32(n)/14
+	}
+	x := chart.NewBand(labels...).Padding(inner, 0.1)
 	y := chart.NewLinear(0, hi).Nice(4)
 	yt := y.Ticks(4)
 	for i := range yt {
@@ -292,11 +305,18 @@ func (a *App) historyPage(c *ui.Context, pal *palette) {
 	for i, k := range kindLabels {
 		labels[i] = a.t(k[0], k[1])
 	}
-	a.header(c, pal, a.t("同步记录", "Sync History"), a.t("每一次手机发来的数据、配对和被拒绝的请求", "Every sync, pairing and rejected request"), func() {
+	filter := func() {
 		if ui.Segmented(c, &a.logKind, labels...).Changed() {
 			a.Refresh()
 		}
-	})
+	}
+	if a.narrow {
+		// the filter goes under the title, scrolling sideways
+		a.header(c, pal, a.t("同步记录", "Sync History"), "", nil)
+		ui.ScrollHorizontal(c).Shrink(0).Scrollbars(false).Padding(0, a.gutter(), 8, a.gutter()).Children(filter)
+	} else {
+		a.header(c, pal, a.t("同步记录", "Sync History"), a.t("每一次手机发来的数据、配对和被拒绝的请求", "Every sync, pairing and rejected request"), filter)
+	}
 	if len(a.logs) == 0 {
 		ui.Column(c).Grow(1).Padding(0, 22, 22, 22).Children(func() { a.empty(c, pal, a.t("还没有记录", "Nothing yet"), 200) })
 		return
@@ -309,9 +329,16 @@ func (a *App) historyPage(c *ui.Context, pal *palette) {
 		{Title: a.t("新增", "New"), Width: 80, Align: ui.End},
 		{Title: a.t("详情", "Detail")},
 	}
+	// a narrow window keeps time, event, device and what was new
+	show := []int{0, 1, 2, 3, 4, 5}
+	if a.narrow {
+		show = []int{0, 1, 2, 4}
+		cols = []ui.TableColumn{{Title: cols[0].Title, Width: 78}, {Title: cols[1].Title, Width: 92}, cols[2], {Title: cols[4].Title, Width: 56, Align: ui.End}}
+	}
 	ui.Column(c).Grow(1).MinHeight(0).Padding(0, 12, 12, 12).Children(func() {
 		ui.Table(c, &a.logList, cols, len(a.logs), func(row, col int) {
 			e := a.logs[row]
+			col = show[col]
 			switch col {
 			case 0:
 				ui.Text(c, when(e.Time)).FontSize(12).TextColor(pal.textMuted).Tooltip(e.Time)
@@ -402,12 +429,12 @@ func (a *App) pairPage(c *ui.Context, pal *palette) {
 	a.header(c, pal, a.t("配对和设备", "Pair & Devices"), a.t("用 iPhone 相机扫一下就配好", "Scan with the iPhone camera and you're done"), nil)
 	b, _ := a.host.Backend()
 	ui.Scroll(c).Grow(1).MinHeight(0).Children(func() {
-		ui.Column(c).Padding(4, 22, 22, 22).Gap(18).Children(func() {
+		ui.Column(c).Padding(4, a.gutter(), 22, a.gutter()).Gap(18).Children(func() {
 			a.pairedCard(c, pal)
 			for _, p := range a.pending {
 				a.pendingCard(c, pal, b, p)
 			}
-			ui.Row(c).Gap(24).AlignItems(ui.Center).Padding(18).Radius(14).Background(pal.inset).Children(func() {
+			a.stack(c, 24).Padding(18).Radius(14).Background(pal.inset).Children(func() {
 				a.qrBox(c, pal, b)
 				ui.Column(c).Grow(1).MinWidth(0).Gap(10).Children(func() {
 					ui.Text(c, a.t("和「健康册」App 配对", "Pair with the Healthfolio app")).FontSize(16).FontWeight(650)
@@ -503,7 +530,7 @@ func (a *App) newPair(b Backend) {
 }
 
 func (a *App) qrBox(c *ui.Context, pal *palette, b Backend) {
-	box := ui.Column(c).Size(200, 200).Shrink(0).Center().Radius(14).Background(pal.card).Border(1, pal.cardBorder)
+	box := ui.Column(c).Size(200, 200).Shrink(0).AlignSelf(ui.Center).Center().Radius(14).Background(pal.card).Border(1, pal.cardBorder)
 	box.Children(func() {
 		if a.pairQR != nil {
 			in := box.AnimateTo(a.pair.Code, 1, ui.Animation{Spring: ui.SpringOptions{Duration: 500 * time.Millisecond, Bounce: 0.25}})
@@ -616,7 +643,7 @@ func (a *App) mcpPage(c *ui.Context, pal *palette) {
 	b, _ := a.host.Backend()
 	a.header(c, pal, a.t("AI 助手（MCP）", "AI Assistants (MCP)"), a.t("让 Claude 等 AI 助手只读查询你的健康数据", "Let Claude and other assistants read your health data"), nil)
 	ui.Scroll(c).Grow(1).MinHeight(0).Children(func() {
-		ui.Column(c).Padding(4, 22, 22, 22).Gap(16).Children(func() {
+		ui.Column(c).Padding(4, a.gutter(), 22, a.gutter()).Gap(16).Children(func() {
 			on := a.ov.MCPEnabled
 			a.group(c, pal, a.t("访问权限", "Access"), "", func() {
 				sub := a.t("关掉后，所有 AI 助手都连不上，令牌保留，重新打开就能用", "When off, no assistant can connect. Tokens are kept and work again when you turn it back on")
@@ -664,9 +691,11 @@ func (a *App) mcpPage(c *ui.Context, pal *palette) {
 					a.copyBlock(c, pal, i, firstNonEmpty(titles[cfg.ID], cfg.Title), cfg.Text)
 				}
 			}
-			cmd, _ := json.Marshal(a.host.StdioCommand())
-			a.copyBlock(c, pal, 99, a.t("本机 stdio（不需要令牌，用的就是这个 App，不用另外安装）", "On this computer, over stdio (no token; uses this app, nothing else to install)"),
-				`{"mcpServers": {"healthsync": {"command": `+string(cmd)+`, "args": ["mcp"]}}}`)
+			if !a.web { // stdio is for assistants on the computer running the server
+				cmd, _ := json.Marshal(a.host.StdioCommand())
+				a.copyBlock(c, pal, 99, a.t("本机 stdio（不需要令牌，用的就是这个 App，不用另外安装）", "On this computer, over stdio (no token; uses this app, nothing else to install)"),
+					`{"mcpServers": {"healthsync": {"command": `+string(cmd)+`, "args": ["mcp"]}}}`)
+			}
 			a.group(c, pal, a.t("提示词、资源和 Skill", "Prompts, resources and skill"), "", func() {
 				ui.Text(c, a.t("连上后，AI 助手里可以直接选这些提示词：每周健康回顾、体检报告解读、睡眠分析、两个时间段对比。也能读取数据库结构、最新体检、近 7 天概况等资源。",
 					"Once connected, the assistant offers these prompts: weekly review, checkup review, sleep analysis, compare two periods. It can also read resources such as the database schema, the latest checkup and the last 7 days.")).
@@ -750,7 +779,7 @@ func (a *App) reportsPage(c *ui.Context, pal *palette) {
 			case 5:
 				// the items and where each is in the originals, in the web dashboard
 				if b != nil && ui.Button(c.Key("rep-open-"+r.ID), a.t("查看项目", "Items")).Tooltip(a.t("在网页面板里查看项目，点项目可在原件里定位", "See the items in the web dashboard; click one to find it in the original")).Clicked() {
-					a.host.OpenURL(strings.TrimSuffix(b.DashboardURL(), "/") + "/#reports/" + url.PathEscape(r.ID))
+					a.host.OpenURL(strings.TrimSuffix(b.DashboardURL(), "/") + "/lite/#reports/" + url.PathEscape(r.ID))
 				}
 			}
 		}).Grow(1)

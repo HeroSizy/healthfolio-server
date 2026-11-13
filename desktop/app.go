@@ -60,6 +60,10 @@ type App struct {
 	host Host
 	zh   bool
 	page string
+	web  bool // the web dashboard: no settings, no onboarding (SetWeb)
+	// narrow is a window under narrowWidth (a phone's browser): a top bar instead of the
+	// sidebar, and sections stacked instead of side by side
+	narrow bool
 
 	// loaded data
 	ov         model.Overview
@@ -111,6 +115,10 @@ func New(host Host, zh bool) *App {
 	a.resetForm()
 	return a
 }
+
+// SetWeb makes the window the web dashboard: the server's settings and the first-launch
+// guide are the desktop app's, so they are left out.
+func (a *App) SetWeb() { a.web = true }
 
 // t picks the Chinese or the English string.
 func (a *App) t(zh, en string) string {
@@ -250,26 +258,68 @@ func (a *App) View(c *ui.Context) {
 		a.toast = ""
 	}
 	bar := c.TitleBar()
+	w, _ := c.Size()
+	a.narrow = w < narrowWidth
 	row := ui.Row(c).Fill().AlignItems(ui.Stretch)
 	backdrop(c, row, pal)
 	if a.ob.show {
 		row.Children(func() { a.onboardingView(c, pal) })
 		return
 	}
+	page := func() {
+		// each page rises into place as it opens
+		ui.Column(c.Key("page-" + a.page)).Grow(1).MinHeight(0).Transition(ui.ElementTransition{
+			Enter:     &ui.Motion{Y: 10, Opacity: 0},
+			Animation: &ui.Animation{Duration: 220 * time.Millisecond, Ease: ui.EaseOut},
+		}).Children(func() { a.content(c, pal) })
+	}
+	if a.narrow {
+		// a phone's browser: the pages as tabs along the top, the page under them
+		row.Children(func() {
+			ui.Column(c).Grow(1).MinWidth(0).Children(func() {
+				a.topBar(c, pal)
+				card := raised(ui.Column(c).Grow(1).MinHeight(0).Radius(14).Margin(0, 8, 8, 8), pal).Clip()
+				card.Children(page)
+			})
+		})
+		return
+	}
 	row.Children(func() {
 		a.sidebar(c, pal, bar)
 		ui.Column(c).Grow(1).MinWidth(0).Padding(10, 10, 10, 0).DragWindow().Children(func() {
 			card := raised(ui.Column(c).Grow(1).MinHeight(0).Radius(14), pal).Clip()
-			card.Children(func() {
-				// each page rises into place as it opens
-				ui.Column(c.Key("page-" + a.page)).Grow(1).MinHeight(0).Transition(ui.ElementTransition{
-					Enter:     &ui.Motion{Y: 10, Opacity: 0},
-					Animation: &ui.Animation{Duration: 220 * time.Millisecond, Ease: ui.EaseOut},
-				}).Children(func() { a.content(c, pal) })
-			})
+			card.Children(page)
 		})
 	})
 }
+
+// stack is a centered row, or a column in a narrow window.
+func (a *App) stack(c *ui.Context, gap float32) ui.Element {
+	if a.narrow {
+		return ui.Column(c).Gap(gap).AlignItems(ui.Stretch)
+	}
+	return ui.Row(c).Gap(gap).AlignItems(ui.Center)
+}
+
+// tileBasis lets four overview tiles share a row, or two in a narrow window.
+func (a *App) tileBasis() float32 {
+	if a.narrow {
+		return 120
+	}
+	return 170
+}
+
+// gutter is the space at the sides of a page.
+func (a *App) gutter() float32 {
+	if a.narrow {
+		return 14
+	}
+	return 22
+}
+
+// narrowWidth is the window width under which the sidebar becomes a bar on top: the web
+// dashboard on a phone.
+const narrowWidth = 640
 
 func (a *App) content(c *ui.Context, pal *palette) {
 	b, why := a.host.Backend()
@@ -297,7 +347,7 @@ func (a *App) stopped(c *ui.Context, pal *palette, why string) {
 	ui.Column(c).Fill().Center().Gap(10).Padding(40).Children(func() {
 		ui.Text(c, a.t("服务器没有运行", "The server isn't running")).FontSize(18).FontWeight(600)
 		ui.Text(c, why).TextColor(pal.textMuted).TextAlign(ui.Center).MaxWidth(420)
-		if ui.PrimaryButton(c, a.t("打开设置", "Open Settings")).Clicked() {
+		if !a.web && ui.PrimaryButton(c, a.t("打开设置", "Open Settings")).Clicked() {
 			a.page = "settings"
 		}
 	})
@@ -305,7 +355,7 @@ func (a *App) stopped(c *ui.Context, pal *palette, why string) {
 
 // header is a page's title row inside the card.
 func (a *App) header(c *ui.Context, pal *palette, title, sub string, trailing func()) {
-	ui.Row(c).Shrink(0).AlignItems(ui.Center).Gap(12).Padding(18, 22, 10, 22).DragWindow().Children(func() {
+	ui.Row(c).Shrink(0).AlignItems(ui.Center).Gap(12).Padding(18, a.gutter(), 10, a.gutter()).DragWindow().Children(func() {
 		ui.Column(c).Grow(1).MinWidth(0).Gap(2).Children(func() {
 			ui.Text(c, title).FontSize(20).FontWeight(650).TextColor(pal.text).SingleLine()
 			if sub != "" {

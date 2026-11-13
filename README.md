@@ -21,8 +21,10 @@ It does not use a cloud service. It does not need an account.
     the rejected tokens.
   - The checkup reports.
 
-  The desktop app shows the dashboard in its window. The headless server shows it in a web
-  browser.
+  The desktop app shows the dashboard in its window. In a web browser, the dashboard is the
+  same window, written in Go and compiled to WebAssembly (about 5 MB the first time). A
+  lighter HTML version is at `/lite/`, and it also shows a checkup item framed in the
+  original PDF or photo.
 - **Pairing with a QR code.** Click **Pair a new iPhone**. Scan the QR code with the iPhone
   camera. Each paired device gets its own token. You can rename a device or revoke its token
   in the dashboard.

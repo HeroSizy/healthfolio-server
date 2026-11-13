@@ -1,4 +1,7 @@
 version: 2
+before:
+  # the web dashboard (WebAssembly), which every server binary embeds
+  hooks: [sh scripts/build-web.sh]
 builds:
   - env: [CGO_ENABLED=0]
     goos: [linux, darwin, windows, freebsd]
