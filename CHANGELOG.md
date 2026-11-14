@@ -3,6 +3,17 @@
 Releases happen on their own: bump `version` in mygo.json, add its section here, push to
 main. The desktop app shows the section of a new version in its update window.
 
+## 0.0.19
+
+- Checkups open right in the window, in the app and in the browser: the items on one side,
+  the page of the original PDF or photo on the other. Click an item and its page comes up
+  with the item framed. You can also page through the original. Nothing opens in a
+  browser any more.
+- The server draws PDF pages itself, with PDFium compiled to WebAssembly: no other program
+  needed, the same on macOS, Windows, Linux and in Docker. It starts when a page is first
+  asked for and stops again after a minute without any.
+- A click anywhere on a report's row opens it.
+
 ## 0.0.18
 
 - The web dashboard is now the app's own window, written in Go and running in the browser

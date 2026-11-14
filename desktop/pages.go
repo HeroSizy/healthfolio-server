@@ -3,7 +3,6 @@ package desktop
 import (
 	"encoding/json"
 	"fmt"
-	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -747,6 +746,10 @@ func firstNonEmpty(v ...string) string {
 // ---------------------------------------------------------------- reports
 
 func (a *App) reportsPage(c *ui.Context, pal *palette) {
+	if a.rv.id != "" {
+		a.reportDetailPage(c, pal)
+		return
+	}
 	a.header(c, pal, a.t("体检报告", "Checkups"), a.t("在 App 里导入的体检报告（PDF、照片 → 结构化数值）", "Reports imported in the app (PDF or photo → values)"), nil)
 	if len(a.reports) == 0 {
 		ui.Column(c).Grow(1).Padding(0, 22, 22, 22).Children(func() { a.empty(c, pal, a.t("还没有体检报告", "No checkups yet"), 200) })
@@ -758,15 +761,20 @@ func (a *App) reportsPage(c *ui.Context, pal *palette) {
 		{Title: a.t("收到", "Received"), Width: 110},
 		{Title: "", Width: 110},
 	}
-	b, _ := a.host.Backend()
+	// a narrow window keeps the date, the place and the flagged count
+	show := []int{0, 1, 2, 3, 4, 5}
+	if a.narrow {
+		show = []int{0, 1, 3, 5}
+		cols = []ui.TableColumn{{Title: cols[0].Title, Width: 92}, cols[1], {Title: cols[3].Title, Width: 50, Align: ui.End}, {Title: "", Width: 64}}
+	}
 	ui.Column(c).Grow(1).MinHeight(0).Padding(0, 12, 12, 12).Children(func() {
 		ui.Table(c, &a.repList, cols, len(a.reports), func(row, col int) {
 			r := a.reports[row]
-			switch col {
+			switch show[col] {
 			case 0:
 				ui.Text(c, r.Date).FontSize(13)
 			case 1:
-				ui.Text(c, r.Institution).FontSize(13).SingleLine()
+				ui.Text(c, firstNonEmpty(r.Title, r.Institution)).FontSize(13).SingleLine()
 			case 2:
 				ui.Text(c, itoa(r.Items)).FontSize(13)
 			case 3:
@@ -777,11 +785,16 @@ func (a *App) reportsPage(c *ui.Context, pal *palette) {
 			case 4:
 				ui.Text(c, when(r.Received)).FontSize(12).TextColor(pal.textMuted)
 			case 5:
-				// the items and where each is in the originals, in the web dashboard
-				if b != nil && ui.Button(c.Key("rep-open-"+r.ID), a.t("查看项目", "Items")).Tooltip(a.t("在网页面板里查看项目，点项目可在原件里定位", "See the items in the web dashboard; click one to find it in the original")).Clicked() {
-					a.host.OpenURL(strings.TrimSuffix(b.DashboardURL(), "/") + "/lite/#reports/" + url.PathEscape(r.ID))
+				// the items, and where each is printed in the originals, right here
+				if ui.Button(c.Key("rep-open-"+r.ID), a.t("查看", "Open")).Tooltip(a.t("查看项目，点项目可在原件里定位", "See the items; click one to find it in the original")).Clicked() {
+					a.openReport(r.ID)
 				}
 			}
 		}).Grow(1)
 	})
+	// a click anywhere on a row opens it too
+	if p := a.repPick; p >= 0 && p < len(a.reports) {
+		a.repPick = -1
+		a.openReport(a.reports[p].ID)
+	}
 }

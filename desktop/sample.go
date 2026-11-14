@@ -1,7 +1,12 @@
 package desktop
 
 import (
+	"bytes"
 	"fmt"
+	"image"
+	"image/color"
+	"image/draw"
+	"image/png"
 	"math"
 	"time"
 
@@ -129,6 +134,50 @@ func (s *Sample) Reports() ([]model.ReportRow, error) {
 		{ID: "c", Date: "2024-09-27", Institution: "Annual checkup", Items: 41, Flagged: 1, Received: time.Now().AddDate(0, 0, -20).Format(time.RFC3339)},
 	}, nil
 }
+
+// sampleItems are the lines of the made-up checkup, top to bottom on its one page.
+var sampleItems = [][5]string{
+	{"Glucose (fasting)", "5.9", "mmol/L", "3.9-6.1", ""},
+	{"HbA1c", "6.1", "%", "4.0-6.0", "H"},
+	{"Total cholesterol", "5.6", "mmol/L", "<5.2", "H"},
+	{"LDL cholesterol", "3.7", "mmol/L", "<3.4", "H"},
+	{"HDL cholesterol", "1.3", "mmol/L", ">1.0", ""},
+	{"Triglycerides", "1.4", "mmol/L", "<1.7", ""},
+	{"ALT", "28", "U/L", "7-40", ""},
+	{"Creatinine", "82", "µmol/L", "59-104", ""},
+}
+
+func (s *Sample) ReportDetail(id string) (model.ReportDetail, error) {
+	rep := model.Report{ID: id, Date: "2026-10-18", Institution: "Annual checkup"}
+	for i, it := range sampleItems {
+		rep.Items = append(rep.Items, model.ReportItem{Name: it[0], Value: it[1], Unit: it[2], Range: it[3], Flag: it[4],
+			Location: &model.ItemLocation{File: "report.pdf", Page: 0, X: 0.08, Y: 0.2 + 0.07*float64(i), W: 0.84, H: 0.05}})
+	}
+	return model.ReportDetail{Report: rep, Files: []model.ReportFile{{Name: "report.pdf", Size: 412_000, Type: "application/pdf"}}}, nil
+}
+
+// ReportPage draws a plain page with a row for each item where its location says.
+func (s *Sample) ReportPage(id, file string, n, width int) (model.PageImage, error) {
+	w, h := width, width*1414/1000
+	img := image.NewNRGBA(image.Rect(0, 0, w, h))
+	draw.Draw(img, img.Bounds(), &image.Uniform{color.NRGBA{255, 255, 255, 255}}, image.Point{}, draw.Src)
+	bar := func(x0, y0, x1, y1 float64, c color.NRGBA) {
+		draw.Draw(img, image.Rect(int(x0*float64(w)), int(y0*float64(h)), int(x1*float64(w)), int(y1*float64(h))), &image.Uniform{c}, image.Point{}, draw.Src)
+	}
+	bar(0.08, 0.06, 0.5, 0.09, color.NRGBA{40, 40, 46, 255})
+	bar(0.08, 0.11, 0.35, 0.125, color.NRGBA{150, 150, 160, 255})
+	for i := range sampleItems {
+		y := 0.2 + 0.07*float64(i)
+		bar(0.1, y+0.018, 0.42, y+0.032, color.NRGBA{90, 90, 100, 255})
+		bar(0.55, y+0.018, 0.65, y+0.032, color.NRGBA{30, 30, 36, 255})
+		bar(0.72, y+0.018, 0.88, y+0.032, color.NRGBA{170, 170, 180, 255})
+		bar(0.08, y+0.058, 0.92, y+0.06, color.NRGBA{225, 225, 230, 255})
+	}
+	var b bytes.Buffer
+	_ = png.Encode(&b, img)
+	return model.PageImage{Data: b.Bytes(), Type: "image/png", Pages: 1}, nil
+}
+
 func (s *Sample) Daily(typ string, days int) ([]model.DailyPoint, error) {
 	out := make([]model.DailyPoint, days)
 	for i := range out {

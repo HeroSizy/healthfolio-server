@@ -110,6 +110,14 @@ func (in *Instance) RenameDevice(id int64, name string) error {
 	return in.db.RenameDevice(id, name)
 }
 func (in *Instance) Reports() ([]model.ReportRow, error) { return in.db.Reports() }
+
+// ReportDetail is a report's items and the originals kept with it.
+func (in *Instance) ReportDetail(id string) (model.ReportDetail, error) { return in.srv.reportDetail(id) }
+
+// ReportPage is page n of an original as an image (PDF pages drawn), at most width wide.
+func (in *Instance) ReportPage(id, file string, n, width int) (model.PageImage, error) {
+	return in.srv.reportPage(id, file, n, width)
+}
 func (in *Instance) Daily(typ string, days int) ([]model.DailyPoint, error) {
 	return in.db.Daily(typ, days)
 }

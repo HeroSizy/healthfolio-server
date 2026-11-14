@@ -22,6 +22,10 @@ type Backend interface {
 	SetMCPEnabled(on bool) error
 	SkillMD() string
 	Reports() ([]model.ReportRow, error)
+	ReportDetail(id string) (model.ReportDetail, error)
+	// ReportPage is page n (from 0) of an original of a report as an image, at most width
+	// pixels wide: the server draws PDF pages, so the window needs no PDF viewer.
+	ReportPage(id, file string, n, width int) (model.PageImage, error)
 	Daily(typ string, days int) ([]model.DailyPoint, error)
 	NewPairCode() (model.PairInfo, error)
 	CurrentPair() (model.PairInfo, bool)
@@ -94,7 +98,9 @@ type App struct {
 	formDirty bool
 	saveErr   string
 
-	ob onboarding
+	ob      onboarding
+	rv      reportView // the checkup report open, if any (report.go)
+	repPick int        // the row of the reports list just clicked, or -1
 
 	toast   string
 	loading sync.Mutex
@@ -112,6 +118,8 @@ var dayRanges = []int{7, 30, 365}
 func New(host Host, zh bool) *App {
 	a := &App{host: host, zh: zh, page: "overview", dayRange: 1}
 	a.logList.RoundRows, a.repList.RoundRows = true, true
+	a.repPick = -1
+	a.repList.Selected = &a.repPick
 	a.resetForm()
 	return a
 }

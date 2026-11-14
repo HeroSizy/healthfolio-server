@@ -174,6 +174,39 @@ func (r *Remote) Reports() ([]model.ReportRow, error) {
 	return out, r.do("GET", "/api/reports", nil, &out)
 }
 
+func (r *Remote) ReportDetail(id string) (model.ReportDetail, error) {
+	var d model.ReportDetail
+	return d, r.do("GET", "/api/reports/"+url.PathEscape(id), nil, &d)
+}
+
+func (r *Remote) ReportPage(id, file string, n, width int) (model.PageImage, error) {
+	path := "/api/reports/" + url.PathEscape(id) + "/files/" + url.PathEscape(file) + "/pages/" + strconv.Itoa(n) + "?w=" + strconv.Itoa(width)
+	req, err := http.NewRequest("GET", r.Base+path, nil)
+	if err != nil {
+		return model.PageImage{}, err
+	}
+	res, err := r.client.Do(req)
+	if err != nil {
+		return model.PageImage{}, err
+	}
+	defer res.Body.Close()
+	data, err := io.ReadAll(io.LimitReader(res.Body, 64<<20))
+	if err != nil {
+		return model.PageImage{}, err
+	}
+	if res.StatusCode != 200 {
+		var e struct {
+			Error string `json:"error"`
+		}
+		if json.Unmarshal(data, &e) == nil && e.Error != "" {
+			return model.PageImage{}, fmt.Errorf("%s", e.Error)
+		}
+		return model.PageImage{}, fmt.Errorf("page %d of %s: %s", n+1, file, res.Status)
+	}
+	pages, _ := strconv.Atoi(res.Header.Get("X-Pages"))
+	return model.PageImage{Data: data, Type: res.Header.Get("Content-Type"), Pages: pages}, nil
+}
+
 func (r *Remote) Daily(typ string, days int) ([]model.DailyPoint, error) {
 	var out []model.DailyPoint
 	q := url.Values{"type": {typ}, "days": {strconv.Itoa(days)}}

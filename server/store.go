@@ -400,48 +400,12 @@ func nullable(s string) any {
 	return s
 }
 
-// Report is what the database keeps of a checkup report. report.json in its folder keeps
-// everything the app sent, including fields this server does not know.
-type Report struct {
-	ID          string       `json:"id"`
-	Date        string       `json:"date"`
-	Institution string       `json:"institution"`
-	Title       string       `json:"title,omitempty"`
-	Items       []ReportItem `json:"items"`
-	// Originals lists the report's original files (PDFs, photos), when the app sent it.
-	Originals []OriginalFile `json:"originals,omitempty"`
-}
-
-type ReportItem struct {
-	Name  string `json:"name"`
-	Key   string `json:"key"`
-	Value any    `json:"value"`
-	Unit  string `json:"unit"`
-	Range string `json:"range"`
-	Flag  string `json:"flag"`
-	// OriginalName is the name as printed in the report, when it differs from Name.
-	OriginalName string `json:"originalName,omitempty"`
-	// Location is where the item is in the original files.
-	Location *ItemLocation `json:"location,omitempty"`
-}
-
-// ItemLocation is a box on a page of one of the original files: File is its name, Page
-// counts from 0, and X, Y, W, H are fractions of the page, from its top left corner.
-type ItemLocation struct {
-	File string  `json:"file"`
-	Page int     `json:"page"`
-	X    float64 `json:"x"`
-	Y    float64 `json:"y"`
-	W    float64 `json:"w"`
-	H    float64 `json:"h"`
-}
-
-type OriginalFile struct {
-	Name   string `json:"name"`
-	Type   string `json:"type"`
-	Size   int64  `json:"size"`
-	SHA256 string `json:"sha256"`
-}
+type (
+	Report       = model.Report
+	ReportItem   = model.ReportItem
+	ItemLocation = model.ItemLocation
+	OriginalFile = model.OriginalFile
+)
 
 func (d *DB) InsertReport(rep Report, folderName, folder string) (int, error) {
 	d.mu.Lock()

@@ -209,6 +209,7 @@ func (s *Server) routes() {
 	m.HandleFunc("GET /api/reports", s.admin(s.apiReports))
 	m.HandleFunc("GET /api/reports/{id}", s.admin(s.apiReport))
 	m.HandleFunc("GET /api/reports/{id}/files/{name}", s.admin(s.apiReportFile))
+	m.HandleFunc("GET /api/reports/{id}/files/{name}/pages/{n}", s.admin(s.apiReportPage))
 	m.HandleFunc("GET /api/daily", s.admin(s.apiDaily))
 	m.HandleFunc("GET /api/token", s.admin(s.apiToken))
 	s.mux = m
@@ -1143,6 +1144,35 @@ func (s *Server) apiReport(w http.ResponseWriter, r *http.Request) {
 		files = append(files, map[string]any{"name": name, "size": fi.Size(), "type": contentType(name)})
 	}
 	writeJSON(w, 200, map[string]any{"report": rep, "files": files, "folder": folder})
+}
+
+// apiReportPage is a page of an original as an image, PDF pages drawn by the server:
+// GET /api/reports/{id}/files/{name}/pages/{n}?w=1200 (n from 0, w the most pixels wide).
+// X-Pages says how many pages the file has.
+func (s *Server) apiReportPage(w http.ResponseWriter, r *http.Request) {
+	n, err := strconv.Atoi(r.PathValue("n"))
+	width, _ := strconv.Atoi(r.URL.Query().Get("w"))
+	if width == 0 {
+		width = 1200
+	}
+	if err != nil || n < 0 {
+		http.NotFound(w, r)
+		return
+	}
+	img, err := s.reportPage(r.PathValue("id"), r.PathValue("name"), n, width)
+	switch {
+	case errors.Is(err, os.ErrNotExist), errors.Is(err, errNoPage):
+		http.NotFound(w, r)
+		return
+	case err != nil:
+		errJSON(w, 422, err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", img.Type)
+	w.Header().Set("X-Pages", strconv.Itoa(img.Pages))
+	w.Header().Set("Cache-Control", "private, max-age=300")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	_, _ = w.Write(img.Data)
 }
 
 // apiReportFile serves one original file of a report: GET /api/reports/{id}/files/{name}.

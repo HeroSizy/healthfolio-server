@@ -1,6 +1,11 @@
 package desktop
 
 import (
+	"bytes"
+	"encoding/base64"
+	"image"
+	"image/jpeg"
+	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
@@ -155,5 +160,37 @@ func TestRemoteUnreachable(t *testing.T) {
 	}
 	if _, err := r.Devices(); err == nil {
 		t.Fatal("devices of a stopped server")
+	}
+}
+
+// A report and a page of its original, as the window reads them in a browser.
+func TestRemoteReportPage(t *testing.T) {
+	r, ts, _ := remoteFor(t)
+	var jb bytes.Buffer
+	_ = jpeg.Encode(&jb, image.NewRGBA(image.Rect(0, 0, 40, 30)), nil)
+	body := `{"folder":"f","report":{"id":"R9","date":"2026-11-03","institution":"Lab","items":[{"name":"LDL","value":3.9,"flag":"high",
+		"location":{"file":"photo.jpg","page":0,"x":0.1,"y":0.2,"w":0.5,"h":0.1}}]},
+		"files":[{"name":"photo.jpg","data":"` + base64.StdEncoding.EncodeToString(jb.Bytes()) + `"}]}`
+	req, _ := http.NewRequest("POST", ts.URL+"/report", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer master")
+	if res, err := http.DefaultClient.Do(req); err != nil || res.StatusCode != 200 {
+		t.Fatalf("report: %v %v", res, err)
+	}
+	d, err := r.ReportDetail("R9")
+	if err != nil || len(d.Report.Items) != 1 || d.Report.Items[0].Location.File != "photo.jpg" || len(d.Files) != 1 {
+		t.Fatalf("detail: %+v %v", d, err)
+	}
+	if valueText(d.Report.Items[0].Value) != "3.9" || !flagged.MatchString(d.Report.Items[0].Flag) {
+		t.Fatalf("item: %+v", d.Report.Items[0])
+	}
+	img, err := r.ReportPage("R9", "photo.jpg", 0, 800)
+	if err != nil || img.Pages != 1 || img.Type != "image/jpeg" || !bytes.Equal(img.Data, jb.Bytes()) {
+		t.Fatalf("page: %v %v", img.Type, err)
+	}
+	if _, err := r.ReportPage("R9", "photo.jpg", 3, 800); err == nil {
+		t.Fatal("page 4 of a photo")
+	}
+	if _, err := r.ReportDetail("nope"); err == nil {
+		t.Fatal("unknown report")
 	}
 }

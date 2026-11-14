@@ -7,6 +7,7 @@ package main
 
 import (
 	"log"
+	"net/url"
 	"strings"
 	"syscall/js"
 	"time"
@@ -64,10 +65,15 @@ func main() {
 		h.win = mygo.NewWindow(mygo.WindowOptions{Title: "Healthfolio", Content: ui.View(h.app.View)})
 		// the page opens on the tab its address names, as the old dashboard did
 		frag := strings.TrimPrefix(js.Global().Get("location").Get("hash").String(), "#")
-		switch frag = strings.Split(frag, "/")[0]; frag {
-		case "history", "pair", "mcp", "reports":
+		parts := strings.Split(frag, "/")
+		switch frag = parts[0]; {
+		case frag == "reports" && len(parts) > 1 && parts[1] != "":
+			// #reports/<id>, as the iPhone app and older links open a report
+			id, _ := url.PathUnescape(parts[1])
+			h.app.OpenReport(id)
+		case frag == "history" || frag == "pair" || frag == "mcp" || frag == "reports":
 			h.app.ShowPage(frag)
-		case "devices":
+		case frag == "devices":
 			h.app.ShowPage("pair")
 		default:
 			h.app.Refresh()
