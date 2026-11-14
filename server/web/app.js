@@ -477,7 +477,8 @@ async function showItem(i) {
   const file = repDetail.files.find(f => f.name === loc.file);
   if (!file) { box.innerHTML = `<p class="empty">${t("rd.missing", { name: esc(loc.file) })}</p>`; return; }
   const url = fileURL(repDetail.report.id, file.name);
-  const frame = `<div class="rd-hl" style="left:${loc.x * 100}%;top:${loc.y * 100}%;width:${loc.w * 100}%;height:${loc.h * 100}%"></div>`;
+  // the frame stands 6px off the text on every side, so its border never covers the item
+  const frame = `<div class="rd-hl" style="left:calc(${loc.x * 100}% - 6px);top:calc(${loc.y * 100}% - 6px);width:calc(${loc.w * 100}% + 12px);height:calc(${loc.h * 100}% + 12px)"></div>`;
   const caption = `<p class="muted small">${esc(file.name)}${file.type === "application/pdf" ? " · " + t("rd.page", { n: loc.page + 1 }) : ""}</p>`;
   if (file.type.startsWith("image/")) {
     box.innerHTML = `${caption}<div class="rd-sheet"><img src="${url}" alt="">${frame}</div>`;

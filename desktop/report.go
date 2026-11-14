@@ -154,7 +154,7 @@ func (a *App) reportDetailPage(c *ui.Context, pal *palette) {
 	}
 	ui.Row(c).Grow(1).MinHeight(0).Gap(16).Padding(4, a.gutter(), 16, a.gutter()).AlignItems(ui.Stretch).Children(func() {
 		ui.Scroll(c).Grow(1).Basis(0).MinWidth(0).Children(func() { a.reportItems(c, pal) })
-		ui.Scroll(c).Grow(1.7).Basis(0).MinWidth(0).Children(func() { a.pageViewer(c, pal) })
+		ui.Scroll(c).Grow(1.35).Basis(0).MinWidth(0).Children(func() { a.pageViewer(c, pal) })
 	})
 }
 
@@ -284,10 +284,16 @@ func (a *App) pageViewer(c *ui.Context, pal *palette) {
 			if loc == nil || loc.File != a.rv.file || loc.Page != a.rv.page {
 				return
 			}
+			// the frame stands a little off the text (1% of the page's width on every
+			// side), so its border never covers the item it frames
+			padX := 0.01
+			padY := padX * float64(w) / float64(max(1, h))
+			x0, y0 := max(0, loc.X-padX), max(0, loc.Y-padY)
+			x1, y1 := min(1, loc.X+loc.W+padX), min(1, loc.Y+loc.H+padY)
 			hl := ui.Box(c.Key("hl-"+itoa(a.rv.item))).Absolute().
-				LeftPercent(float32(loc.X*100)).TopPercent(float32(loc.Y*100)).
-				WidthPercent(float32(loc.W*100)).HeightPercent(float32(loc.H*100)).
-				Radius(4).Border(2, pal.accent).Background(pal.accent.Alpha(0.14))
+				LeftPercent(float32(x0*100)).TopPercent(float32(y0*100)).
+				WidthPercent(float32((x1-x0)*100)).HeightPercent(float32((y1-y0)*100)).
+				Radius(5).Border(2, pal.accent).Background(pal.accent.Alpha(0.08))
 			// the frame springs onto the item, then sits still
 			pop := hl.AnimateTo("pop", 1, ui.Animation{Spring: ui.SpringOptions{Duration: 450 * time.Millisecond, Bounce: 0.3}})
 			hl.Scale(1.15-0.15*pop, 1.15-0.15*pop).Opacity(pop).Shadow(0, 0, 0, 4*pop, pal.accent.Alpha(0.18))

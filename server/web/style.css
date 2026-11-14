@@ -211,7 +211,7 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 1
 .rd-page { max-height: 75vh; overflow: auto; border-radius: 8px; }
 .rd-sheet { position: relative; line-height: 0; }
 .rd-sheet img, .rd-sheet canvas { width: 100%; height: auto; display: block; border-radius: 6px; background: #fff; }
-.rd-hl { position: absolute; border: 2px solid var(--accent); background: rgba(255, 55, 95, .15); border-radius: 3px;
+.rd-hl { position: absolute; border: 2px solid var(--accent); background: rgba(255, 55, 95, .08); border-radius: 5px;
   box-shadow: 0 0 0 4px rgba(255, 55, 95, .18); pointer-events: none; }
 .rd-pdf { width: 100%; height: 70vh; border: 0; border-radius: 6px; }
 @media (max-width: 800px) { .rd-grid { grid-template-columns: 1fr; } }
