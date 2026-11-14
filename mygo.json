@@ -15,8 +15,7 @@
     "minimumSystemVersion": "12.0",
     "signingIdentity": "Developer ID Application: Zengyu Si (HK2CBGL2Q2)",
     "notarize": {
-      "keychainProfile": "mytwig-notary",
-      "keychain": "/Users/zen/Library/Keychains/mytwig-signing.keychain-db"
+      "keychainProfile": "healthfolio-notary"
     },
     "infoPlist": {
       "LSUIElement": false,
