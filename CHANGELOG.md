@@ -3,7 +3,10 @@
 Releases happen on their own: bump `version` in mygo.json, add its section here, push to
 main. The desktop app shows the section of a new version in its update window.
 
-## 0.0.19
+## 0.1.0
+
+The first 0.1 release: one Go window for the desktop app and the web dashboard, with
+checkups, their originals, pairing and AI assistant setup all inside it.
 
 - Checkups open right in the window, in the app and in the browser: the items on one side,
   the page of the original PDF or photo on the other. Click an item and its page comes up
