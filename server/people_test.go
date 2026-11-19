@@ -255,6 +255,29 @@ func TestPeopleClaimAndMerge(t *testing.T) {
 	}
 }
 
+// An app that sends no person id takes the owner only while no phone has it; any other
+// such phone is someone new, without the family.
+func TestOldAppPairing(t *testing.T) {
+	_, ts := newTestServer(t)
+	u := ts.URL
+	first := pairAs(t, u, `{"device":"old1","device_id":"OLD1"}`)
+	if first["family"] != true || first["person"].(map[string]any)["owner"] != true {
+		t.Fatalf("first old phone: %v", first)
+	}
+	second := pairAs(t, u, `{"device":"old2","device_id":"OLD2"}`)
+	if second["family"] != false || second["person"].(map[string]any)["owner"] != false || second["person"].(map[string]any)["name"] != "old2" {
+		t.Fatalf("second old phone: %v", second)
+	}
+	// pairing again keeps its person
+	again := pairAs(t, u, `{"device":"old2","device_id":"OLD2"}`)
+	if again["person"].(map[string]any)["id"] != second["person"].(map[string]any)["id"] || again["family"] != false {
+		t.Fatalf("old phone paired again: %v", again)
+	}
+	if _, r := do(t, "GET", u+"/people", again["token"].(string), ""); len(r["people"].([]any)) != 1 {
+		t.Fatalf("second old phone sees: %v", r)
+	}
+}
+
 func TestDevicesMigrateToOwner(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "health.db")

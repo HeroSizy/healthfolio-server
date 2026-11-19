@@ -63,6 +63,11 @@ The server finds the person like this:
 3. Nobody has `"me"` yet and no other phone belongs to `"me"`: the phone takes `"me"`.
 4. Else: a new person with `person_name`.
 
+An app without `person_id` (older versions) follows the same steps without step 1: it
+keeps the person it had, or takes `"me"` while no phone belongs to `"me"`. Any other such
+phone becomes a new person named after the device, with `family: false`. Merge it into the
+right person in the dashboard if needed.
+
 The answer (from `/pair` and from `GET /pair/requests/{id}` when approved) has two more fields:
 
 ```json

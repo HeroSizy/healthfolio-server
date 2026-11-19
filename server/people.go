@@ -462,14 +462,24 @@ func (s *Server) pairPerson(req pairRequest) (n int64, family bool, err error) {
 		}
 		return n, n == ownerNum, nil
 	}
+	ownerFree := !s.db.ownerClaimed() && s.db.phonesOf(ownerNum) == 0
 	key := req.PersonID
 	if key == "" {
-		// an app that knows nothing of people: as before, everything is the owner's,
-		// unless it paired before
+		// an app that knows nothing of people: it keeps the person it had, or takes the
+		// owner while no phone has. Any other phone is someone new, without the family:
+		// a relative's phone on an old app must not see everyone.
 		if known {
 			return keep(old.PersonNum)
 		}
-		return keep(ownerNum)
+		if ownerFree {
+			return ownerNum, true, nil
+		}
+		name := req.Device
+		p, err := s.db.addPerson("srv-"+randomHex(8), personFields{Name: &name})
+		if err != nil {
+			return 0, false, err
+		}
+		return p.Num, false, nil
 	}
 	if p, ok := s.db.personByKey(key); ok {
 		return keep(p.Num)
@@ -477,7 +487,7 @@ func (s *Server) pairPerson(req pairRequest) (n int64, family bool, err error) {
 	if known {
 		return old.PersonNum, old.Family, s.db.addPersonKey(key, old.PersonNum)
 	}
-	if !s.db.ownerClaimed() && s.db.phonesOf(ownerNum) == 0 {
+	if ownerFree {
 		if err := s.db.addPersonKey(key, ownerNum); err != nil {
 			return 0, false, err
 		}
