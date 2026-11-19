@@ -58,7 +58,7 @@ func Start(cfg *Config, onEvent func(model.LogEntry)) (*Instance, error) {
 	addr := net.JoinHostPort(cfg.Bind, fmt.Sprint(cfg.Port))
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
-		srv.mcp.db.Close()
+		srv.mcp.Close()
 		db.Close()
 		return nil, err
 	}
@@ -91,12 +91,32 @@ func (in *Instance) Stop() {
 		_ = in.hs.Shutdown(ctx)
 		// the read-only connection of MCP too: the desktop app starts a new server each
 		// time the settings are saved, and each one left its connection open
-		in.srv.mcp.db.Close()
+		in.srv.mcp.Close()
+		in.srv.closePeople()
 		in.db.Close()
 	})
 }
 
-func (in *Instance) Overview() model.Overview { return in.srv.overview(in.Cfg.BaseURL()) }
+// person is the person with id key, the owner for "" or an id no longer there.
+func (in *Instance) person(key string) (model.Person, *DB) {
+	p, ok := in.db.personByKey(firstNonEmpty(key, ownerKey))
+	if !ok {
+		p, _ = in.db.personByNum(ownerNum)
+	}
+	db, err := in.srv.personDB(p.Num)
+	if err != nil {
+		p, _ = in.db.personByNum(ownerNum)
+		db = in.db
+	}
+	return p, db
+}
+
+// Overview is the summary, with the samples and reports of the person with id person
+// (the owner for "").
+func (in *Instance) Overview(person string) model.Overview {
+	p, _ := in.person(person)
+	return in.srv.overview(in.Cfg.BaseURL(), p)
+}
 
 func (in *Instance) Logs(limit int, before int64, kind string) ([]model.LogEntry, error) {
 	return in.db.Logs(limit, before, kind)
@@ -109,17 +129,49 @@ func (in *Instance) SkillMD() string                  { return skillMD }
 func (in *Instance) RenameDevice(id int64, name string) error {
 	return in.db.RenameDevice(id, name)
 }
-func (in *Instance) Reports() ([]model.ReportRow, error) { return in.db.Reports() }
+func (in *Instance) Reports(person string) ([]model.ReportRow, error) {
+	_, db := in.person(person)
+	return db.Reports()
+}
 
 // ReportDetail is a report's items and the originals kept with it.
-func (in *Instance) ReportDetail(id string) (model.ReportDetail, error) { return in.srv.reportDetail(id) }
+func (in *Instance) ReportDetail(person, id string) (model.ReportDetail, error) {
+	_, db := in.person(person)
+	return in.srv.reportDetail(db, id)
+}
 
 // ReportPage is page n of an original as an image (PDF pages drawn), at most width wide.
-func (in *Instance) ReportPage(id, file string, n, width int) (model.PageImage, error) {
-	return in.srv.reportPage(id, file, n, width)
+func (in *Instance) ReportPage(person, id, file string, n, width int) (model.PageImage, error) {
+	_, db := in.person(person)
+	return in.srv.reportPage(db, id, file, n, width)
 }
-func (in *Instance) Daily(typ string, days int) ([]model.DailyPoint, error) {
-	return in.db.Daily(typ, days)
+func (in *Instance) Daily(person, typ string, days int) ([]model.DailyPoint, error) {
+	_, db := in.person(person)
+	return db.Daily(typ, days)
+}
+
+// SetDevicePerson moves a device to the person with id person.
+func (in *Instance) SetDevicePerson(id int64, person string) error {
+	return in.srv.SetDevicePerson(id, person)
+}
+
+// SetDeviceFamily lets a phone manage every person, or only its own.
+func (in *Instance) SetDeviceFamily(id int64, on bool) error { return in.db.SetDeviceFamily(id, on) }
+
+// MergePeople moves everything of one person into another and removes the first.
+func (in *Instance) MergePeople(from, into string) error { return in.srv.MergePeople(from, into) }
+
+// RenamePerson changes the name shown for a person.
+func (in *Instance) RenamePerson(id, name string) error {
+	p, ok := in.db.personByKey(id)
+	if !ok {
+		return errUnknownPerson
+	}
+	f := personFields{Name: &name}
+	if err := f.check(); err != nil {
+		return err
+	}
+	return in.db.updatePerson(p.Num, f)
 }
 
 func (in *Instance) pairInfo(c PairCode) model.PairInfo {
@@ -152,7 +204,7 @@ func (in *Instance) NewMCPToken(name string) (model.MCPConnect, error) {
 		name = "AI assistant"
 	}
 	tok := newToken()
-	if _, _, err := in.db.AddDevice(name, tok, "127.0.0.1", "", scopeMCP); err != nil {
+	if _, _, err := in.db.AddDevice(name, tok, "127.0.0.1", "", scopeMCP, 0, false); err != nil {
 		return model.MCPConnect{}, err
 	}
 	in.db.Log(LogEntry{Kind: "pair", Device: name, OK: true, Message: "MCP token created in the app"})

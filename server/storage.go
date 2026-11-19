@@ -54,8 +54,9 @@ func (s *Server) measureStorage() model.Storage {
 	counted := map[string]bool{}
 	for _, k := range []struct{ kind, path string }{
 		{"reports", filepath.Join(dir, "reports")},
-		{"chats", s.chatsDir()},
-		{"settings", s.settingsDir()},
+		{"chats", s.chatsDir(ownerNum)},
+		{"settings", s.settingsDir(ownerNum)},
+		{"people", filepath.Join(dir, "people")}, // the family's databases and files
 	} {
 		b, n := dirSize(k.path)
 		add(k.kind, k.path, b, n)

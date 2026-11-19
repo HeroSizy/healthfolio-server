@@ -17,6 +17,7 @@ import (
 // reportView is the report open on the Checkups page.
 type reportView struct {
 	id     string
+	person string // whose report it is
 	detail *model.ReportDetail
 	err    string
 	item   int // the item chosen, or -1
@@ -46,13 +47,14 @@ func (a *App) OpenReport(id string) {
 }
 
 func (a *App) openReport(id string) {
-	a.rv = reportView{id: id, item: -1}
+	person := a.person
+	a.rv = reportView{id: id, person: person, item: -1}
 	b, _ := a.host.Backend()
 	if b == nil {
 		return
 	}
 	go func() {
-		d, err := b.ReportDetail(id)
+		d, err := b.ReportDetail(person, id)
 		a.host.Update(func() {
 			if a.rv.id != id {
 				return
@@ -81,9 +83,9 @@ func (a *App) showPage(file string, n int) {
 		return
 	}
 	a.rv.loading, a.rv.pageErr = key, ""
-	id := a.rv.id
+	id, person := a.rv.id, a.rv.person
 	go func() {
-		img, err := b.ReportPage(id, file, n, pageWidth)
+		img, err := b.ReportPage(person, id, file, n, pageWidth)
 		var bmp *ui.Bitmap
 		if err == nil {
 			bmp, err = ui.DecodeBitmap(img.Data)

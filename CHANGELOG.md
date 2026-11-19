@@ -3,6 +3,24 @@
 Releases happen on their own: bump `version` in mygo.json, add its section here, push to
 main. The desktop app shows the section of a new version in its update window.
 
+## Unreleased
+
+Family: one server keeps the health data of several people, each in a database of their
+own.
+
+- Every person has their own database and folders. What was there before is the owner's
+  (`health.db` stays where it is); everyone else is under `people/<n>/`.
+- A phone pairs for a person (the app sends the person's id) and sends that person's
+  data. The owner's phone can manage the whole family; other phones see only their own
+  person, unless the dashboard's "Manages family" switch is on.
+- The dashboard shows one person at a time, with a bar of names to switch, and a card
+  for each person on the overview: their records, checkups, what the last checkup
+  flagged, and their last sync. A person can be merged into another, and a device moved
+  to another person.
+- AI assistants get `list_people` and a `person` argument on every tool; `query_sql`
+  reads one person's database. A token made for one person sees only them.
+- The app's API for people is in [docs/people-api.md](docs/people-api.md).
+
 ## 0.1.0
 
 The first 0.1 release: one Go window for the desktop app and the web dashboard, with

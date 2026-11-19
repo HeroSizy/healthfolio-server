@@ -93,9 +93,21 @@ func (r *Remote) background(method, path string, body any) {
 	}()
 }
 
-func (r *Remote) Overview() model.Overview {
+// withPerson adds ?person= (or &person=) to path, for a person other than the owner.
+func withPerson(path, person string) string {
+	if person == "" {
+		return path
+	}
+	sep := "?"
+	if strings.Contains(path, "?") {
+		sep = "&"
+	}
+	return path + sep + "person=" + url.QueryEscape(person)
+}
+
+func (r *Remote) Overview(person string) model.Overview {
 	var o model.Overview
-	if err := r.do("GET", "/api/overview", nil, &o); err != nil && r.Failed != nil {
+	if err := r.do("GET", withPerson("/api/overview", person), nil, &o); err != nil && r.Failed != nil {
 		r.Failed(err)
 	}
 	r.mu.Lock()
@@ -169,18 +181,18 @@ func (r *Remote) LoadSkill() {
 	}()
 }
 
-func (r *Remote) Reports() ([]model.ReportRow, error) {
+func (r *Remote) Reports(person string) ([]model.ReportRow, error) {
 	var out []model.ReportRow
-	return out, r.do("GET", "/api/reports", nil, &out)
+	return out, r.do("GET", withPerson("/api/reports", person), nil, &out)
 }
 
-func (r *Remote) ReportDetail(id string) (model.ReportDetail, error) {
+func (r *Remote) ReportDetail(person, id string) (model.ReportDetail, error) {
 	var d model.ReportDetail
-	return d, r.do("GET", "/api/reports/"+url.PathEscape(id), nil, &d)
+	return d, r.do("GET", withPerson("/api/reports/"+url.PathEscape(id), person), nil, &d)
 }
 
-func (r *Remote) ReportPage(id, file string, n, width int) (model.PageImage, error) {
-	path := "/api/reports/" + url.PathEscape(id) + "/files/" + url.PathEscape(file) + "/pages/" + strconv.Itoa(n) + "?w=" + strconv.Itoa(width)
+func (r *Remote) ReportPage(person, id, file string, n, width int) (model.PageImage, error) {
+	path := withPerson("/api/reports/"+url.PathEscape(id)+"/files/"+url.PathEscape(file)+"/pages/"+strconv.Itoa(n)+"?w="+strconv.Itoa(width), person)
 	req, err := http.NewRequest("GET", r.Base+path, nil)
 	if err != nil {
 		return model.PageImage{}, err
@@ -207,10 +219,28 @@ func (r *Remote) ReportPage(id, file string, n, width int) (model.PageImage, err
 	return model.PageImage{Data: data, Type: res.Header.Get("Content-Type"), Pages: pages}, nil
 }
 
-func (r *Remote) Daily(typ string, days int) ([]model.DailyPoint, error) {
+func (r *Remote) Daily(person, typ string, days int) ([]model.DailyPoint, error) {
 	var out []model.DailyPoint
 	q := url.Values{"type": {typ}, "days": {strconv.Itoa(days)}}
+	if person != "" {
+		q.Set("person", person)
+	}
 	return out, r.do("GET", "/api/daily?"+q.Encode(), nil, &out)
+}
+
+func (r *Remote) SetDevicePerson(id int64, person string) error {
+	r.background("PATCH", "/api/devices/"+strconv.FormatInt(id, 10), map[string]string{"person": person})
+	return nil
+}
+
+func (r *Remote) SetDeviceFamily(id int64, on bool) error {
+	r.background("PATCH", "/api/devices/"+strconv.FormatInt(id, 10), map[string]bool{"family": on})
+	return nil
+}
+
+func (r *Remote) MergePeople(from, into string) error {
+	r.background("POST", "/api/people/"+url.PathEscape(from)+"/merge", map[string]string{"into": into})
+	return nil
 }
 
 type pairState struct {

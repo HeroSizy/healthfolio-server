@@ -27,6 +27,9 @@ type LogEntry struct {
 	OK         bool     `json:"ok"`
 	Message    string   `json:"message"`
 	Types      []string `json:"types"`
+	// Person is the name of whose data it was, when it was not the owner's.
+	Person    string `json:"person,omitempty"`
+	PersonNum int64  `json:"-"`
 }
 
 type DayCount struct {
@@ -52,6 +55,37 @@ type Device struct {
 	// DeviceID is the phone's own stable id, when it sent one; pairing again with the same
 	// id updates this device instead of adding another.
 	DeviceID string `json:"device_id,omitempty"`
+	// Person is the id of the person the device belongs to and PersonName their name. An AI
+	// token that sees everyone has neither.
+	Person     string `json:"person,omitempty"`
+	PersonName string `json:"person_name,omitempty"`
+	// Family: this phone may read and write every person, and add people.
+	Family bool `json:"family"`
+	// PersonNum is the person's number inside the server; 0 for an AI token that sees
+	// everyone.
+	PersonNum int64 `json:"-"`
+}
+
+// Person is one human whose health data the server keeps, each in their own database.
+type Person struct {
+	// ID is the person's id: the app's person id (a UUID), or "me" for the server's owner
+	// until a phone takes it.
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Relation string `json:"relation"`
+	Birth    string `json:"birth"`
+	Sex      string `json:"sex"`
+	// Owner is the server's owner, whose data was there before people existed.
+	Owner bool `json:"owner"`
+	// Me is the person the asking phone belongs to (in the app's API only).
+	Me           bool    `json:"me,omitempty"`
+	Records      int     `json:"records"`
+	Reports      int     `json:"reports"`
+	Flagged      int     `json:"flagged"` // items flagged high or low in the latest report
+	LatestReport string  `json:"latest_report,omitempty"`
+	LastReceived *string `json:"last_received"`
+	Devices      int     `json:"devices"`
+	Num          int64   `json:"-"`
 }
 
 type ReportRow struct {
@@ -117,6 +151,9 @@ type Overview struct {
 	Password     bool       `json:"password"`
 	MCPEnabled   bool       `json:"mcp_enabled"`
 	Storage      Storage    `json:"storage"`
+	// Person is whose data Stats, Activity, Reports and LastSync are; People is everyone.
+	Person Person   `json:"person"`
+	People []Person `json:"people"`
 }
 
 // Storage is how much room the data takes, by kind, and how much the disk has left.
@@ -130,7 +167,8 @@ type Storage struct {
 
 type StoragePart struct {
 	// Kind is "database" (health.db with its -wal and -shm), "reports", "chats",
-	// "settings", "csv" or "other".
+	// "settings", "csv", "people" (everyone but the owner: their databases and files) or
+	// "other".
 	Kind  string `json:"kind"`
 	Bytes int64  `json:"bytes"`
 	Files int    `json:"files"`
@@ -148,8 +186,10 @@ type PairInfo struct {
 
 // PendingPair is a device waiting for someone to allow it to pair without a code.
 type PendingPair struct {
-	ID      string `json:"id"`
-	Device  string `json:"device"`
+	ID     string `json:"id"`
+	Device string `json:"device"`
+	// For is the person the phone says it is for, by name ("" when it did not say).
+	For     string `json:"for,omitempty"`
 	IP      string `json:"ip"`
 	Created string `json:"created"`
 	// Confirm is the short code the phone shows too; compare them before allowing.

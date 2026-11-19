@@ -170,8 +170,8 @@ func (r *pageRenderer) renderPDF(path string, size int64, n, width int) (model.P
 }
 
 // reportPage is a page of one original of a report, for the window and the dashboard.
-func (s *Server) reportPage(id, name string, n, width int) (model.PageImage, error) {
-	_, folder, err := s.db.ReportDetail(id)
+func (s *Server) reportPage(db *DB, id, name string, n, width int) (model.PageImage, error) {
+	_, folder, err := db.ReportDetail(id)
 	if err != nil || folder == "" || name != filepath.Base(name) || name == "report.json" || strings.HasPrefix(name, ".") {
 		return model.PageImage{}, os.ErrNotExist
 	}
@@ -179,8 +179,8 @@ func (s *Server) reportPage(id, name string, n, width int) (model.PageImage, err
 }
 
 // reportDetail is a report with the originals kept with it.
-func (s *Server) reportDetail(id string) (model.ReportDetail, error) {
-	rep, folder, err := s.db.ReportDetail(id)
+func (s *Server) reportDetail(db *DB, id string) (model.ReportDetail, error) {
+	rep, folder, err := db.ReportDetail(id)
 	if err != nil {
 		return model.ReportDetail{}, err
 	}

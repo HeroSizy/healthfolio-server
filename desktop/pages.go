@@ -17,6 +17,7 @@ import (
 func (a *App) overviewPage(c *ui.Context, pal *palette) {
 	o := a.ov
 	a.header(c, pal, a.t("概览", "Overview"), a.t("iPhone 同步到这台电脑的健康数据", "Health data your iPhone syncs to this computer"), nil)
+	a.personBar(c, pal)
 	ui.Scroll(c).Grow(1).MinHeight(0).Children(func() {
 		ui.Column(c).Padding(4, a.gutter(), 22, a.gutter()).Gap(16).Children(func() {
 			// tiles
@@ -72,6 +73,7 @@ func (a *App) overviewPage(c *ui.Context, pal *palette) {
 					}, func() { a.dailyChart(c, pal) })
 				})
 			})
+			a.familySection(c, pal)
 			a.storageSection(c, pal, o.Storage)
 		})
 	})
@@ -80,7 +82,7 @@ func (a *App) overviewPage(c *ui.Context, pal *palette) {
 var storageKinds = map[string][2]string{
 	"database": {"健康数据库", "Health database"}, "reports": {"体检报告", "Checkups"},
 	"chats": {"AI 对话备份", "AI chat backups"}, "settings": {"App 设置备份", "App settings backups"},
-	"csv": {"CSV 文件", "CSV files"}, "other": {"其它", "Other"},
+	"csv": {"CSV 文件", "CSV files"}, "people": {"家人的数据", "Family's data"}, "other": {"其它", "Other"},
 }
 
 // storageSection shows how much room the data takes, by kind, and what the disk has left.
@@ -348,6 +350,9 @@ func (a *App) historyPage(c *ui.Context, pal *palette) {
 				if dev == "shared token" {
 					dev = a.t("共享令牌", "shared token")
 				}
+				if e.Person != "" {
+					dev += " → " + e.Person
+				}
 				ui.Column(c).Gap(1).Children(func() {
 					ui.Text(c, dev).FontSize(13).SingleLine()
 					meta := e.IP
@@ -592,6 +597,12 @@ func (a *App) devicesSection(c *ui.Context, pal *palette, b Backend) {
 						}
 						ui.Text(c, fmt.Sprintf("%s %s · %s %s · %s", a.t("配对于", "paired"), when(d.Created), a.t("最近", "last seen"), seen, d.LastIP)).
 							FontSize(11).TextColor(pal.textFaint).SingleLine()
+						if len(a.ov.People) > 1 {
+							ui.Row(c).AlignItems(ui.Center).Gap(10).Margin(4, 0, 0, 0).Wrap().Children(func() {
+								ui.Text(c, a.t("数据属于", "Data of")).FontSize(12).TextColor(pal.textFaint)
+								a.devicePerson(c, pal, b, d)
+							})
+						}
 					})
 					if b == nil {
 						return
@@ -751,6 +762,7 @@ func (a *App) reportsPage(c *ui.Context, pal *palette) {
 		return
 	}
 	a.header(c, pal, a.t("体检报告", "Checkups"), a.t("在 App 里导入的体检报告（PDF、照片 → 结构化数值）", "Reports imported in the app (PDF or photo → values)"), nil)
+	a.personBar(c, pal)
 	if len(a.reports) == 0 {
 		ui.Column(c).Grow(1).Padding(0, 22, 22, 22).Children(func() { a.empty(c, pal, a.t("还没有体检报告", "No checkups yet"), 200) })
 		return

@@ -49,6 +49,10 @@ type Server struct {
 	mux     *http.ServeMux
 	stor    storageCache
 	pwFails failures // wrong dashboard passwords, by address
+	// pdbs are the databases of the people other than the owner (people.go); peopleMu keeps
+	// adding, merging and deleting people one at a time
+	pdbs     personDBs
+	peopleMu sync.Mutex
 }
 
 // failures counts wrong dashboard passwords from each address. The password is chosen by
@@ -128,6 +132,7 @@ func NewServer(cfg *Config, db *DB, token string) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
+	m.ensure = s.personDB
 	s.mcp = m
 	s.routes()
 	return s, nil
@@ -171,6 +176,10 @@ func (s *Server) routes() {
 	m.HandleFunc("GET /mcp", s.handleMCP)
 	m.HandleFunc("DELETE /mcp", s.handleMCP)
 	m.HandleFunc("POST /mcp/tokens", s.handleMCPToken)
+	m.HandleFunc("GET /people", s.handlePeople)
+	m.HandleFunc("POST /people/me", s.handleClaimPerson)
+	m.HandleFunc("PUT /people/{id}", s.handlePutPerson)
+	m.HandleFunc("DELETE /people/{id}", s.handleDeletePerson)
 	m.HandleFunc("GET /skill.md", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
 		w.Header().Set("Content-Disposition", `inline; filename="SKILL.md"`)
@@ -212,6 +221,11 @@ func (s *Server) routes() {
 	m.HandleFunc("GET /api/reports/{id}/files/{name}/pages/{n}", s.admin(s.apiReportPage))
 	m.HandleFunc("GET /api/daily", s.admin(s.apiDaily))
 	m.HandleFunc("GET /api/token", s.admin(s.apiToken))
+	m.HandleFunc("GET /api/people", s.admin(s.apiPeople))
+	m.HandleFunc("POST /api/people", s.admin(s.apiNewPerson))
+	m.HandleFunc("PATCH /api/people/{id}", s.admin(s.apiUpdatePerson))
+	m.HandleFunc("DELETE /api/people/{id}", s.admin(s.apiDeletePerson))
+	m.HandleFunc("POST /api/people/{id}/merge", s.admin(s.apiMergePerson))
 	s.mux = m
 }
 
@@ -268,7 +282,7 @@ func (s *Server) authDevice(r *http.Request) (Device, bool) {
 		return Device{}, false
 	}
 	if subtle.ConstantTimeCompare([]byte(tok), []byte(s.token)) == 1 {
-		return Device{Name: "shared token", Scope: scopeDevice}, true
+		return sharedTokenDevice, true
 	}
 	if d, ok := s.db.DeviceForToken(tok); ok {
 		s.db.TouchDevice(d.ID, clientIP(r))
@@ -276,6 +290,10 @@ func (s *Server) authDevice(r *http.Request) (Device, bool) {
 	}
 	return Device{}, false
 }
+
+// sharedTokenDevice is the shared token as a device: the owner's, managing the family. Only
+// the computer running the server shows it.
+var sharedTokenDevice = Device{Name: "shared token", Scope: scopeDevice, Family: true, PersonNum: ownerNum}
 
 // authPhone is authDevice for calls only a phone may make (sending data, making AI
 // tokens): an AI assistant's read-only token is refused with 403.
@@ -303,8 +321,17 @@ func (s *Server) handleAuth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	server := map[string]any{"name": s.cfg.Name, "version": version, "protocol": protocolVersion}
+	withPerson := func(out map[string]any, d Device) map[string]any {
+		out["family"] = seesEveryone(d)
+		if d.PersonNum != 0 {
+			if p, ok := s.db.personByNum(d.PersonNum); ok {
+				out["person"] = personJSON(p)
+			}
+		}
+		return out
+	}
 	if subtle.ConstantTimeCompare([]byte(tok), []byte(s.token)) == 1 {
-		writeJSON(w, 200, map[string]any{"ok": true, "scope": scopeDevice, "device": map[string]any{"name": "shared token"}, "server": server})
+		writeJSON(w, 200, withPerson(map[string]any{"ok": true, "scope": scopeDevice, "device": map[string]any{"name": "shared token"}, "server": server}, sharedTokenDevice))
 		return
 	}
 	d, found := s.db.LookupToken(tok)
@@ -315,7 +342,7 @@ func (s *Server) handleAuth(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 401, map[string]any{"ok": false, "reason": "revoked", "server": server})
 	default:
 		s.db.TouchDevice(d.ID, clientIP(r))
-		writeJSON(w, 200, map[string]any{"ok": true, "scope": d.Scope, "device": map[string]any{"id": d.ID, "name": d.Name}, "server": server})
+		writeJSON(w, 200, withPerson(map[string]any{"ok": true, "scope": d.Scope, "device": map[string]any{"id": d.ID, "name": d.Name}, "server": server}, d))
 	}
 }
 
@@ -452,7 +479,8 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		"records": recordsVersion, "urls": s.urls(r), "mcp_enabled": s.db.MCPEnabled(),
 		// what this server can do beyond protocol 2: two-step pairing with a confirmation
 		// code, GET /auth, pairing again by device_id, backups of AI chats and settings, and reading checkup reports back
-		"features": []string{"pair_requests", "auth", "device_id", "chats", "chats_delete", "settings", "reports_read"},
+		// and people: a database per person, see docs/people-api.md
+		"features": []string{"pair_requests", "auth", "device_id", "chats", "chats_delete", "settings", "reports_read", "people"},
 	}
 	if s.db.MCPEnabled() {
 		out["mcp"] = "/mcp"
@@ -461,11 +489,16 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
-	if _, ok := s.authDevice(r); !ok {
+	dev, ok := s.authDevice(r)
+	if !ok {
 		errJSON(w, 401, "bad token")
 		return
 	}
-	st, err := s.db.Stats()
+	_, db, ok := s.target(w, r, dev)
+	if !ok {
+		return
+	}
+	st, err := db.Stats()
 	if err != nil {
 		errJSON(w, 500, err.Error())
 		return
@@ -481,6 +514,10 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	device := dev.Name
+	person, db, ok := s.target(w, r, dev)
+	if !ok {
+		return
+	}
 	if r.ContentLength > maxIngestBody {
 		errJSON(w, 400, "bad length")
 		return
@@ -490,7 +527,7 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 		errJSON(w, 400, "bad length")
 		return
 	}
-	entry := LogEntry{Kind: "ingest", Device: device, IP: ip, Bytes: len(body)}
+	entry := logPerson(LogEntry{Kind: "ingest", Device: device, IP: ip, Bytes: len(body)}, person)
 	fail := func(code int, msg string) {
 		entry.Message, entry.DurationMS = msg, int(time.Since(start).Milliseconds())
 		s.db.Log(entry)
@@ -508,7 +545,7 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 	entry.Received = len(rows)
 	entry.Types = distinctTypes(rows, 30)
 	added := map[string]int{}
-	n, deleted, err := s.db.InsertRecords(rows)
+	n, deleted, err := db.InsertRecords(rows)
 	if err != nil {
 		fail(500, "sqlite: "+err.Error())
 		return
@@ -518,9 +555,13 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 	if deleted > 0 {
 		entry.Message = fmt.Sprintf("%d deleted", deleted)
 	}
-	// CSV files and the hook inbox keep the six-column format and get no deletions.
+	// CSV files and the hook inbox keep the six-column format and get no deletions. They
+	// have no column for the person, so they get the owner's data only.
 	rows = samples(rows)
-	if s.csv != nil {
+	if !person.Owner {
+		rows = nil
+	}
+	if s.csv != nil && len(rows) > 0 {
 		n, err := s.csv.Write(rows)
 		if err != nil {
 			fail(500, "csv: "+err.Error())
@@ -528,7 +569,7 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 		}
 		added["csv"] = n
 	}
-	if s.hook != nil {
+	if s.hook != nil && len(rows) > 0 {
 		if err := s.hook.Write(rows); err != nil {
 			fail(500, "hook inbox: "+err.Error())
 			return
@@ -592,6 +633,11 @@ func (s *Server) handleReport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	device := dev.Name
+	person, db, ok := s.target(w, r, dev)
+	if !ok {
+		return
+	}
+	reportsDir := filepath.Join(personDir(s.cfg.DataDir, person.Num), "reports")
 	var req struct {
 		// kept as sent, so report.json has every field the app knows (locations of the
 		// items, the list of originals, …), not just those this server reads
@@ -615,7 +661,7 @@ func (s *Server) handleReport(w http.ResponseWriter, r *http.Request) {
 	if name == "" {
 		name = "report-" + time.Now().Format("20060102-150405")
 	}
-	folder := filepath.Join(s.cfg.DataDir, "reports", name)
+	folder := filepath.Join(reportsDir, name)
 	if other := folderReportID(folder); other != "" && req.Report.ID != "" && other != req.Report.ID {
 		// another report already has this folder name: don't overwrite its files
 		suffix := safeName(req.Report.ID)
@@ -623,7 +669,7 @@ func (s *Server) handleReport(w http.ResponseWriter, r *http.Request) {
 			suffix = string(r[:8])
 		}
 		name += "-" + suffix
-		folder = filepath.Join(s.cfg.DataDir, "reports", name)
+		folder = filepath.Join(reportsDir, name)
 	}
 	if err := os.MkdirAll(folder, 0o700); err != nil {
 		errJSON(w, 500, err.Error())
@@ -669,23 +715,23 @@ func (s *Server) handleReport(w http.ResponseWriter, r *http.Request) {
 		errJSON(w, 500, err.Error())
 		return
 	}
-	n, err := s.db.InsertReport(*req.Report, name, folder)
+	n, err := db.InsertReport(*req.Report, name, folder)
 	if err != nil {
 		// The files are saved, but the report is not in the database: fail, so the app
 		// sends it again (sending a report again replaces it).
-		s.db.Log(LogEntry{Kind: "report", Device: device, IP: clientIP(r), Received: len(req.Report.Items),
-			Message: name + ": sqlite: " + err.Error(), DurationMS: int(time.Since(start).Milliseconds())})
+		s.db.Log(logPerson(LogEntry{Kind: "report", Device: device, IP: clientIP(r), Received: len(req.Report.Items),
+			Message: name + ": sqlite: " + err.Error(), DurationMS: int(time.Since(start).Milliseconds())}, person))
 		telemetry.Errorf("report", err.Error())
 		errJSON(w, 500, "sqlite: "+err.Error())
 		return
 	}
 	stores := map[string]any{"sqlite": n}
-	if s.hook != nil {
+	if s.hook != nil && person.Owner {
 		s.hook.Report(folder)
 		stores["hook"] = "queued"
 	}
-	s.db.Log(LogEntry{Kind: "report", Device: device, IP: clientIP(r), Received: len(req.Report.Items), Added: n,
-		OK: err == nil, Message: name, DurationMS: int(time.Since(start).Milliseconds())})
+	s.db.Log(logPerson(LogEntry{Kind: "report", Device: device, IP: clientIP(r), Received: len(req.Report.Items), Added: n,
+		OK: err == nil, Message: name, DurationMS: int(time.Since(start).Milliseconds())}, person))
 	logf("received checkup report %s (%d items) from %s", name, len(req.Report.Items), device)
 	writeJSON(w, 200, map[string]any{"ok": true, "folder": folder, "stores": stores, "files": saved})
 }
@@ -698,7 +744,7 @@ func (s *Server) handlePair(w http.ResponseWriter, r *http.Request) {
 	req := readPairRequest(r)
 	if strings.TrimSpace(req.Code) != "" {
 		if s.pair.Check(req.Code) {
-			s.issue(w, r, req.Device, req.DeviceID, "code", nil)
+			s.issue(w, r, req, "code", nil)
 			return
 		}
 		s.db.Log(LogEntry{Kind: "pair", Device: req.Device, IP: ip, Message: "wrong or expired code"})
@@ -712,7 +758,7 @@ func (s *Server) handlePair(w http.ResponseWriter, r *http.Request) {
 	}
 	_, status, _ := s.pair.Wait(r.Context(), pp.ID, requestTTL)
 	if status == reqApproved && s.pair.Claim(pp.ID) {
-		s.issue(w, r, req.Device, req.DeviceID, "approved", nil)
+		s.issue(w, r, req, "approved", nil)
 		return
 	}
 	if status == reqPending { // the phone hung up
@@ -726,6 +772,10 @@ type pairRequest struct {
 	Device   string `json:"device"`
 	DeviceID string `json:"device_id"`
 	Code     string `json:"code"`
+	// PersonID is the phone owner's person id (the app keeps it in iCloud) and PersonName
+	// the name they chose; see people.go.
+	PersonID   string `json:"person_id"`
+	PersonName string `json:"person_name"`
 }
 
 func readPairRequest(r *http.Request) pairRequest {
@@ -741,6 +791,14 @@ func readPairRequest(r *http.Request) pairRequest {
 	req.DeviceID = strings.TrimSpace(req.DeviceID)
 	if len(req.DeviceID) > 128 {
 		req.DeviceID = req.DeviceID[:128]
+	}
+	req.PersonID = strings.TrimSpace(req.PersonID)
+	if !validPersonKey(req.PersonID) || req.PersonID == ownerKey {
+		req.PersonID = ""
+	}
+	req.PersonName = cleanName(req.PersonName)
+	if rr := []rune(req.PersonName); len(rr) > 40 {
+		req.PersonName = string(rr[:40])
 	}
 	return req
 }
@@ -763,11 +821,22 @@ func cleanName(s string) string {
 }
 
 // issue makes a token for a phone that may pair and answers with it.
-func (s *Server) issue(w http.ResponseWriter, r *http.Request, device, deviceID, how string, extra map[string]any) {
+func (s *Server) issue(w http.ResponseWriter, r *http.Request, req pairRequest, how string, extra map[string]any) {
 	ip := clientIP(r)
+	device := req.Device
 	tok := newToken()
-	dev, repaired, err := s.db.AddDevice(device, tok, ip, deviceID, scopeDevice)
+	person, family, err := s.pairPerson(req)
 	if err != nil {
+		errJSON(w, 500, err.Error())
+		return
+	}
+	dev, repaired, err := s.db.AddDevice(device, tok, ip, req.DeviceID, scopeDevice, person, family)
+	if err != nil {
+		errJSON(w, 500, err.Error())
+		return
+	}
+	p, _ := s.db.personByNum(person)
+	if _, err := s.personDB(person); err != nil {
 		errJSON(w, 500, err.Error())
 		return
 	}
@@ -775,10 +844,14 @@ func (s *Server) issue(w http.ResponseWriter, r *http.Request, device, deviceID,
 	if repaired {
 		msg += ", paired again (earlier token replaced)"
 	}
-	s.db.Log(LogEntry{Kind: "pair", Device: device, IP: ip, OK: true, Message: msg})
+	if !p.Owner {
+		msg += ", for " + personLabel(p)
+	}
+	s.db.Log(logPerson(LogEntry{Kind: "pair", Device: device, IP: ip, OK: true, Message: msg}, p))
 	logf("paired %s (%s) by %s", device, ip, msg)
 	out := map[string]any{"token": tok, "name": s.cfg.Name, "version": protocolVersion, "urls": s.urls(r),
-		"device": map[string]any{"id": dev.ID, "name": dev.Name}, "repaired": repaired}
+		"device": map[string]any{"id": dev.ID, "name": dev.Name}, "repaired": repaired,
+		"person": personJSON(p), "family": family}
 	for k, v := range extra {
 		out[k] = v
 	}
@@ -792,7 +865,7 @@ func (s *Server) openRequest(w http.ResponseWriter, r *http.Request, req pairReq
 		writeJSON(w, 428, map[string]any{"error": "需要配对码 / pairing code required", "reason": "needs_code", "needs_code": true})
 		return nil, false
 	}
-	pp, retry, err := s.pair.Request(req.Device, req.DeviceID, ip, !s.cfg.NoDialog)
+	pp, retry, err := s.pair.Request(req, s.pairPersonName(req), ip, !s.cfg.NoDialog)
 	if err != nil {
 		secs := int(retry.Seconds()) + 1
 		w.Header().Set("Retry-After", strconv.Itoa(secs))
@@ -845,7 +918,7 @@ func (s *Server) handlePairPoll(w http.ResponseWriter, r *http.Request) {
 			pairErr(w, 404, "unknown_request", "this request was already used", nil)
 			return
 		}
-		s.issue(w, r, pp.Device, pp.DeviceID, "approved", map[string]any{"status": reqApproved})
+		s.issue(w, r, pp.req, "approved", map[string]any{"status": reqApproved})
 	case reqDenied:
 		s.db.Log(LogEntry{Kind: "pair", Device: pp.Device, IP: pp.IP, Message: "denied on the computer"})
 		pairErr(w, 403, "not_approved", "电脑上点了「拒绝」 / denied", map[string]any{"status": reqDenied})
@@ -886,14 +959,24 @@ func (s *Server) pairAllowed(w http.ResponseWriter, r *http.Request) bool {
 // ---------------------------------------------------------------- dashboard API
 
 func (s *Server) apiOverview(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, 200, s.overview(s.baseURL(r)))
+	p, ok := s.db.personByKey(firstNonEmpty(r.URL.Query().Get("person"), ownerKey))
+	if !ok {
+		p, _ = s.db.personByNum(ownerNum)
+	}
+	writeJSON(w, 200, s.overview(s.baseURL(r), p))
 }
 
-func (s *Server) overview(base string) model.Overview {
-	st, _ := s.db.Stats()
-	act, _ := s.db.Activity(30)
+// overview is the dashboard's summary: the samples, activity and reports of person p, and
+// everything else of the whole server. LastSync is the latest of anyone's.
+func (s *Server) overview(base string, p Person) model.Overview {
+	db, err := s.personDB(p.Num)
+	if err != nil {
+		db, p = s.db, Person{Num: ownerNum, ID: ownerKey, Owner: true}
+	}
+	st, _ := db.Stats()
+	act, _ := db.activity(30, s.db, p.Num)
 	devs, _ := s.db.Devices()
-	reps, _ := s.db.Reports()
+	reps, _ := db.Reports()
 	last, _ := s.db.Logs(1, 0, "ingest")
 	active := 0
 	for _, d := range devs {
@@ -914,6 +997,13 @@ func (s *Server) overview(base string) model.Overview {
 		Outputs: outputs, Stats: st, Activity: act, Devices: active, Reports: len(reps),
 		PairModes: s.dialogModes(), Password: s.cfg.AdminPassword != "", MCPEnabled: s.db.MCPEnabled(),
 		Storage: s.storage(),
+	}
+	o.People = s.people()
+	o.Person = p
+	for _, q := range o.People {
+		if q.Num == p.Num {
+			o.Person = q
+		}
 	}
 	if len(last) > 0 {
 		o.LastSync = &last[0]
@@ -960,7 +1050,13 @@ func (s *Server) apiLogs(w http.ResponseWriter, r *http.Request) {
 		limit = 100
 	}
 	before, _ := strconv.ParseInt(r.URL.Query().Get("before"), 10, 64)
-	logs, err := s.db.Logs(limit, before, r.URL.Query().Get("kind"))
+	var person int64 // everyone's, unless ?person= says whose
+	if k := r.URL.Query().Get("person"); k != "" {
+		if p, ok := s.db.personByKey(k); ok {
+			person = p.Num
+		}
+	}
+	logs, err := s.db.LogsFor(limit, before, r.URL.Query().Get("kind"), person)
 	if err != nil {
 		errJSON(w, 500, err.Error())
 		return
@@ -988,7 +1084,8 @@ func pathID(r *http.Request) (int64, error) {
 // apiNewDevice issues a token without pairing, e.g. for an AI assistant using /mcp.
 func (s *Server) apiNewDevice(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Name string `json:"name"`
+		Name   string `json:"name"`
+		Person string `json:"person"` // the one person it sees; everyone without
 	}
 	_ = json.NewDecoder(io.LimitReader(r.Body, 1024)).Decode(&req)
 	name := cleanName(req.Name)
@@ -998,8 +1095,17 @@ func (s *Server) apiNewDevice(w http.ResponseWriter, r *http.Request) {
 	if rr := []rune(name); len(rr) > 80 {
 		name = string(rr[:80])
 	}
+	var person int64
+	if req.Person != "" {
+		p, ok := s.db.personByKey(req.Person)
+		if !ok {
+			errJSON(w, 404, "no such person")
+			return
+		}
+		person = p.Num
+	}
 	tok := newToken()
-	if _, _, err := s.db.AddDevice(name, tok, clientIP(r), "", scopeMCP); err != nil {
+	if _, _, err := s.db.AddDevice(name, tok, clientIP(r), "", scopeMCP, person, false); err != nil {
 		errJSON(w, 500, err.Error())
 		return
 	}
@@ -1049,15 +1155,24 @@ func (s *Server) setMCP(on bool, where string) error {
 
 // apiRenameDevice takes {"name":"…"}.
 func (s *Server) apiRenameDevice(w http.ResponseWriter, r *http.Request) {
+	// and/or {"person":"<id>"} to move it to another person, {"family":true|false}
 	var req struct {
-		Name string `json:"name"`
+		Name   *string `json:"name"`
+		Person *string `json:"person"`
+		Family *bool   `json:"family"`
 	}
 	id, err := pathID(r)
 	if err == nil {
 		err = json.NewDecoder(io.LimitReader(r.Body, 1024)).Decode(&req)
 	}
-	if err == nil {
-		err = s.db.RenameDevice(id, req.Name)
+	if err == nil && req.Name != nil {
+		err = s.db.RenameDevice(id, *req.Name)
+	}
+	if err == nil && req.Person != nil {
+		err = s.SetDevicePerson(id, *req.Person)
+	}
+	if err == nil && req.Family != nil {
+		err = s.db.SetDeviceFamily(id, *req.Family)
 	}
 	if err != nil {
 		errJSON(w, 400, err.Error())
@@ -1118,8 +1233,14 @@ func (s *Server) apiPairAnswer(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
 
+// The dashboard's calls about data take ?person=<id>, the owner without one.
+
 func (s *Server) apiReports(w http.ResponseWriter, r *http.Request) {
-	reps, err := s.db.Reports()
+	_, db, ok := s.dashPerson(w, r)
+	if !ok {
+		return
+	}
+	reps, err := db.Reports()
 	if err != nil {
 		errJSON(w, 500, err.Error())
 		return
@@ -1130,7 +1251,11 @@ func (s *Server) apiReports(w http.ResponseWriter, r *http.Request) {
 // apiReport is one report with its items, their places in the originals, and the
 // original files kept: GET /api/reports/{id}.
 func (s *Server) apiReport(w http.ResponseWriter, r *http.Request) {
-	rep, folder, err := s.db.ReportDetail(r.PathValue("id"))
+	_, db, ok := s.dashPerson(w, r)
+	if !ok {
+		return
+	}
+	rep, folder, err := db.ReportDetail(r.PathValue("id"))
 	if err != nil {
 		errJSON(w, 404, "no such report")
 		return
@@ -1159,7 +1284,11 @@ func (s *Server) apiReportPage(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	img, err := s.reportPage(r.PathValue("id"), r.PathValue("name"), n, width)
+	_, db, ok := s.dashPerson(w, r)
+	if !ok {
+		return
+	}
+	img, err := s.reportPage(db, r.PathValue("id"), r.PathValue("name"), n, width)
 	switch {
 	case errors.Is(err, os.ErrNotExist), errors.Is(err, errNoPage):
 		http.NotFound(w, r)
@@ -1177,7 +1306,11 @@ func (s *Server) apiReportPage(w http.ResponseWriter, r *http.Request) {
 
 // apiReportFile serves one original file of a report: GET /api/reports/{id}/files/{name}.
 func (s *Server) apiReportFile(w http.ResponseWriter, r *http.Request) {
-	_, folder, err := s.db.ReportDetail(r.PathValue("id"))
+	_, db, ok := s.dashPerson(w, r)
+	if !ok {
+		return
+	}
+	_, folder, err := db.ReportDetail(r.PathValue("id"))
 	name := r.PathValue("name")
 	if err != nil || folder == "" || name != filepath.Base(name) || name == "report.json" || strings.HasPrefix(name, ".") {
 		http.NotFound(w, r)
@@ -1221,7 +1354,11 @@ func (s *Server) apiDaily(w http.ResponseWriter, r *http.Request) {
 	if days <= 0 || days > 3650 {
 		days = 30
 	}
-	pts, err := s.db.Daily(r.URL.Query().Get("type"), days)
+	_, db, ok := s.dashPerson(w, r)
+	if !ok {
+		return
+	}
+	pts, err := db.Daily(r.URL.Query().Get("type"), days)
 	if err != nil {
 		errJSON(w, 500, err.Error())
 		return

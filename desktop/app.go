@@ -12,8 +12,11 @@ import (
 )
 
 // Backend is the running server.
+//
+// The calls about health data take person: whose data, by person id ("" for the server's
+// owner).
 type Backend interface {
-	Overview() model.Overview
+	Overview(person string) model.Overview
 	Logs(limit int, before int64, kind string) ([]model.LogEntry, error)
 	Devices() ([]model.Device, error)
 	RevokeDevice(id int64) error
@@ -21,12 +24,18 @@ type Backend interface {
 	RenameDevice(id int64, name string) error
 	SetMCPEnabled(on bool) error
 	SkillMD() string
-	Reports() ([]model.ReportRow, error)
-	ReportDetail(id string) (model.ReportDetail, error)
+	Reports(person string) ([]model.ReportRow, error)
+	ReportDetail(person, id string) (model.ReportDetail, error)
 	// ReportPage is page n (from 0) of an original of a report as an image, at most width
 	// pixels wide: the server draws PDF pages, so the window needs no PDF viewer.
-	ReportPage(id, file string, n, width int) (model.PageImage, error)
-	Daily(typ string, days int) ([]model.DailyPoint, error)
+	ReportPage(person, id, file string, n, width int) (model.PageImage, error)
+	Daily(person, typ string, days int) ([]model.DailyPoint, error)
+	// SetDevicePerson moves a phone (or an AI token) to another person; SetDeviceFamily
+	// lets a phone manage every person or only its own.
+	SetDevicePerson(id int64, person string) error
+	SetDeviceFamily(id int64, on bool) error
+	// MergePeople moves everything of one person into another and removes the first.
+	MergePeople(from, into string) error
 	NewPairCode() (model.PairInfo, error)
 	CurrentPair() (model.PairInfo, bool)
 	CancelPair()
@@ -68,6 +77,12 @@ type App struct {
 	// narrow is a window under narrowWidth (a phone's browser): a top bar instead of the
 	// sidebar, and sections stacked instead of side by side
 	narrow bool
+
+	// person is whose data the overview and the checkups show, by id ("" for the owner);
+	// merging is a person whose "merge into…" waits for a second click on mergeInto
+	person    string
+	merging   string
+	mergeInto string
 
 	// loaded data
 	ov         model.Overview
@@ -157,11 +172,12 @@ func (a *App) load() {
 		a.host.Update(func() {})
 		return
 	}
-	ov := b.Overview()
+	person := a.person
+	ov := b.Overview(person)
 	kinds := []string{"", "ingest", "report", "pair", "auth", "hook"}
 	logs, _ := b.Logs(200, 0, kinds[a.logKind])
 	devs, _ := b.Devices()
-	reps, _ := b.Reports()
+	reps, _ := b.Reports(person)
 	pend := b.Pending()
 	var pair *model.PairInfo
 	if p, ok := b.CurrentPair(); ok {
@@ -169,9 +185,12 @@ func (a *App) load() {
 	}
 	var daily []model.DailyPoint
 	if a.selType != "" {
-		daily, _ = b.Daily(a.selType, dayRanges[a.dayRange])
+		daily, _ = b.Daily(person, a.selType, dayRanges[a.dayRange])
 	}
 	a.host.Update(func() {
+		if a.person != person {
+			return // another person was chosen meanwhile; their load follows
+		}
 		a.noticeChanges(ov, devs)
 		a.ov, a.logs, a.devices, a.reports, a.pending, a.daily = ov, logs, devs, reps, pend, daily
 		a.moreLogs = len(logs) == 200
@@ -234,10 +253,10 @@ func (a *App) loadDaily() {
 	if b == nil || a.selType == "" {
 		return
 	}
-	typ, days := a.selType, dayRanges[a.dayRange]
-	d, _ := b.Daily(typ, days)
+	typ, days, person := a.selType, dayRanges[a.dayRange], a.person
+	d, _ := b.Daily(person, typ, days)
 	a.host.Update(func() {
-		if a.selType == typ {
+		if a.selType == typ && a.person == person {
 			a.daily = d
 		}
 	})

@@ -25,6 +25,7 @@ type Sample struct {
 
 	lastSync *model.LogEntry // set by SimulateSync
 	extra    int             // records added by SimulateSync
+	merged   []string        // people merged away
 }
 
 // SimulateSync makes a sync arrive, for checking the animations in the preview.
@@ -43,9 +44,12 @@ func (s *Sample) SimulatePair(name string) {
 func NewSample(update func(func())) *Sample {
 	now := time.Now()
 	return &Sample{update: update, devices: []model.Device{
-		{ID: 3, Name: "AI assistant", Created: now.Add(-2 * time.Hour).Format(time.RFC3339), LastSeen: now.Add(-20 * time.Minute).Format(time.RFC3339), LastIP: "192.168.1.20"},
-		{ID: 2, Name: "iPhone", Created: now.AddDate(0, 0, -12).Format(time.RFC3339), LastSeen: now.Add(-3 * time.Minute).Format(time.RFC3339), LastIP: "192.168.1.42"},
-		{ID: 1, Name: "Old iPhone", Created: now.AddDate(0, -2, 0).Format(time.RFC3339), LastSeen: now.AddDate(0, 0, -40).Format(time.RFC3339), LastIP: "192.168.1.37", Revoked: true},
+		{ID: 4, Name: "Lin's iPhone", Created: now.AddDate(0, 0, -3).Format(time.RFC3339), LastSeen: now.Add(-40 * time.Minute).Format(time.RFC3339), LastIP: "192.168.1.51",
+			Scope: "device", Person: "lin", PersonName: "Lin"},
+		{ID: 3, Name: "AI assistant", Created: now.Add(-2 * time.Hour).Format(time.RFC3339), LastSeen: now.Add(-20 * time.Minute).Format(time.RFC3339), LastIP: "192.168.1.20", Scope: "mcp"},
+		{ID: 2, Name: "iPhone", Created: now.AddDate(0, 0, -12).Format(time.RFC3339), LastSeen: now.Add(-3 * time.Minute).Format(time.RFC3339), LastIP: "192.168.1.42",
+			Scope: "device", Person: "me", PersonName: "Zen", Family: true},
+		{ID: 1, Name: "Old iPhone", Created: now.AddDate(0, -2, 0).Format(time.RFC3339), LastSeen: now.AddDate(0, 0, -40).Format(time.RFC3339), LastIP: "192.168.1.37", Revoked: true, Scope: "device"},
 	}}
 }
 
@@ -53,7 +57,25 @@ func wave(i int, base, amp float64) float64 {
 	return base + amp*math.Sin(float64(i)*0.7) + amp*0.4*math.Cos(float64(i)*1.9)
 }
 
-func (s *Sample) Overview() model.Overview {
+func (s *Sample) Overview(person string) model.Overview {
+	o := s.overview()
+	o.People = s.people()
+	o.Person = o.People[0]
+	for _, p := range o.People {
+		if p.ID == person {
+			o.Person = p
+		}
+	}
+	if !o.Person.Owner {
+		o.Stats.Total, o.Reports = o.Person.Records, o.Person.Reports
+		if o.Person.Records == 0 {
+			o.Stats.Types = nil
+		}
+	}
+	return o
+}
+
+func (s *Sample) overview() model.Overview {
 	now := time.Now()
 	act := make([]model.DayCount, 30)
 	for i := range act {
@@ -127,7 +149,13 @@ func (s *Sample) RenameDevice(id int64, name string) error {
 	}
 	return nil
 }
-func (s *Sample) Reports() ([]model.ReportRow, error) {
+func (s *Sample) Reports(person string) ([]model.ReportRow, error) {
+	if person == "mum" {
+		return []model.ReportRow{{ID: "m", Date: "2026-09-02", Institution: "City hospital", Items: 38, Flagged: 4, Received: time.Now().AddDate(0, 0, -5).Format(time.RFC3339)}}, nil
+	}
+	if person == "lin" {
+		return []model.ReportRow{}, nil
+	}
 	return []model.ReportRow{
 		{ID: "a", Date: "2026-10-18", Institution: "Annual checkup", Items: 46, Flagged: 3, Received: time.Now().Add(-3 * time.Hour).Format(time.RFC3339)},
 		{ID: "b", Date: "2025-10-11", Institution: "Annual checkup", Items: 44, Flagged: 2, Received: time.Now().AddDate(0, 0, -20).Format(time.RFC3339)},
@@ -147,7 +175,7 @@ var sampleItems = [][5]string{
 	{"Creatinine", "82", "µmol/L", "59-104", ""},
 }
 
-func (s *Sample) ReportDetail(id string) (model.ReportDetail, error) {
+func (s *Sample) ReportDetail(_, id string) (model.ReportDetail, error) {
 	rep := model.Report{ID: id, Date: "2026-10-18", Institution: "Annual checkup"}
 	for i, it := range sampleItems {
 		rep.Items = append(rep.Items, model.ReportItem{Name: it[0], Value: it[1], Unit: it[2], Range: it[3], Flag: it[4],
@@ -157,7 +185,7 @@ func (s *Sample) ReportDetail(id string) (model.ReportDetail, error) {
 }
 
 // ReportPage draws a plain page with a row for each item where its location says.
-func (s *Sample) ReportPage(id, file string, n, width int) (model.PageImage, error) {
+func (s *Sample) ReportPage(_, id, file string, n, width int) (model.PageImage, error) {
 	w, h := width, width*1414/1000
 	img := image.NewNRGBA(image.Rect(0, 0, w, h))
 	draw.Draw(img, img.Bounds(), &image.Uniform{color.NRGBA{255, 255, 255, 255}}, image.Point{}, draw.Src)
@@ -178,7 +206,51 @@ func (s *Sample) ReportPage(id, file string, n, width int) (model.PageImage, err
 	return model.PageImage{Data: b.Bytes(), Type: "image/png", Pages: 1}, nil
 }
 
-func (s *Sample) Daily(typ string, days int) ([]model.DailyPoint, error) {
+func (s *Sample) SetDevicePerson(id int64, person string) error {
+	for i := range s.devices {
+		if s.devices[i].ID == id {
+			for _, p := range s.people() {
+				if p.ID == person {
+					s.devices[i].Person, s.devices[i].PersonName = p.ID, p.Name
+				}
+			}
+		}
+	}
+	return nil
+}
+func (s *Sample) SetDeviceFamily(id int64, on bool) error {
+	for i := range s.devices {
+		if s.devices[i].ID == id {
+			s.devices[i].Family = on
+		}
+	}
+	return nil
+}
+func (s *Sample) MergePeople(from, into string) error { s.merged = append(s.merged, from); return nil }
+
+// people are the made-up family: the owner, a spouse with her own iPhone, and a mother
+// whose reports the owner keeps.
+func (s *Sample) people() []model.Person {
+	ago := func(d time.Duration) *string { t := time.Now().Add(-d).Format(time.RFC3339); return &t }
+	all := []model.Person{
+		{ID: "me", Name: "Zen", Owner: true, Records: 184_327 + s.extra, Reports: 3, Flagged: 3, LatestReport: "2026-10-18", LastReceived: ago(3 * time.Minute), Devices: 1},
+		{ID: "lin", Name: "Lin", Relation: "spouse", Records: 96_402, LastReceived: ago(40 * time.Minute), Devices: 1},
+		{ID: "mum", Name: "Mum", Relation: "mother", Birth: "1962-03-14", Sex: "female", Reports: 1, Flagged: 4, LatestReport: "2026-09-02"},
+	}
+	out := []model.Person{}
+	for _, p := range all {
+		merged := false
+		for _, m := range s.merged {
+			merged = merged || m == p.ID
+		}
+		if !merged {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+func (s *Sample) Daily(_, typ string, days int) ([]model.DailyPoint, error) {
 	out := make([]model.DailyPoint, days)
 	for i := range out {
 		v := wave(i, 72, 9)

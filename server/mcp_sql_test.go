@@ -13,7 +13,7 @@ func TestQuerySQLPolicy(t *testing.T) {
 	s, ts := newTestServer(t)
 	do(t, "POST", ts.URL+"/ingest", "master",
 		"HKQuantityTypeIdentifierStepCount|2026-11-01T08:00:00+08:00|2026-11-01T08:10:00+08:00|500|count|phone\n")
-	if _, _, err := s.db.AddDevice("Zen's iPhone", "secret-token-1234567890", "192.168.1.9", "", scopeDevice); err != nil {
+	if _, _, err := s.db.AddDevice("Zen's iPhone", "secret-token-1234567890", "192.168.1.9", "", scopeDevice, ownerNum, true); err != nil {
 		t.Fatal(err)
 	}
 	q := func(sql string) (any, error) { return s.mcp.call("query_sql", map[string]any{"sql": sql}) }

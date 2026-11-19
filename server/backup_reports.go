@@ -57,22 +57,26 @@ func fileSHA256(path string, fi os.FileInfo) (string, error) {
 	return sum, nil
 }
 
-// readDevice lets any paired token in, read-only ones too.
-func (s *Server) readDevice(w http.ResponseWriter, r *http.Request, what string) bool {
-	if _, ok := s.authDevice(r); ok {
-		return true
+// readDevice lets any paired token in, read-only ones too, and returns the database of the
+// person the call is for (?person=, the token's own without).
+func (s *Server) readDevice(w http.ResponseWriter, r *http.Request, what string) (*DB, bool) {
+	dev, ok := s.authDevice(r)
+	if !ok {
+		s.db.Log(LogEntry{Kind: "auth", IP: clientIP(r), Message: "bad token on " + what})
+		writeJSON(w, 401, map[string]any{"error": "bad token", "reason": "bad_token"})
+		return nil, false
 	}
-	s.db.Log(LogEntry{Kind: "auth", IP: clientIP(r), Message: "bad token on " + what})
-	writeJSON(w, 401, map[string]any{"error": "bad token", "reason": "bad_token"})
-	return false
+	_, db, ok := s.target(w, r, dev)
+	return db, ok
 }
 
 // GET /backup/reports
 func (s *Server) handleListReports(w http.ResponseWriter, r *http.Request) {
-	if !s.readDevice(w, r, "/backup/reports") {
+	db, ok := s.readDevice(w, r, "/backup/reports")
+	if !ok {
 		return
 	}
-	reps, err := s.db.ReportFolders()
+	reps, err := db.ReportFolders()
 	if err != nil {
 		errJSON(w, 500, err.Error())
 		return
@@ -104,8 +108,8 @@ func (s *Server) handleListReports(w http.ResponseWriter, r *http.Request) {
 }
 
 // reportFolder is the folder of report id, or "" when there is none.
-func (s *Server) reportFolder(id string) string {
-	_, folder, err := s.db.ReportDetail(id)
+func reportFolderOf(db *DB, id string) string {
+	_, folder, err := db.ReportDetail(id)
 	if err != nil {
 		return ""
 	}
@@ -114,10 +118,11 @@ func (s *Server) reportFolder(id string) string {
 
 // GET /backup/reports/{id}
 func (s *Server) handleGetReport(w http.ResponseWriter, r *http.Request) {
-	if !s.readDevice(w, r, "/backup/reports") {
+	db, ok := s.readDevice(w, r, "/backup/reports")
+	if !ok {
 		return
 	}
-	folder := s.reportFolder(r.PathValue("id"))
+	folder := reportFolderOf(db, r.PathValue("id"))
 	b, err := os.ReadFile(filepath.Join(folder, "report.json"))
 	if folder == "" || err != nil {
 		errJSON(w, 404, "no such report")
@@ -129,10 +134,11 @@ func (s *Server) handleGetReport(w http.ResponseWriter, r *http.Request) {
 
 // GET /backup/reports/{id}/files/{name}
 func (s *Server) handleGetReportFile(w http.ResponseWriter, r *http.Request) {
-	if !s.readDevice(w, r, "/backup/reports") {
+	db, ok := s.readDevice(w, r, "/backup/reports")
+	if !ok {
 		return
 	}
-	folder := s.reportFolder(r.PathValue("id"))
+	folder := reportFolderOf(db, r.PathValue("id"))
 	name := r.PathValue("name")
 	if folder == "" || name != filepath.Base(name) || name == "report.json" || strings.HasPrefix(name, ".") {
 		errJSON(w, 404, "no such file")

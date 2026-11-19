@@ -45,9 +45,11 @@ const (
 )
 
 type PendingPair struct {
-	ID       string    `json:"id"`
-	Device   string    `json:"device"`
-	DeviceID string    `json:"-"`
+	ID       string `json:"id"`
+	Device   string `json:"device"`
+	DeviceID string `json:"-"`
+	For      string `json:"for,omitempty"` // the person it is for, by name
+	req      pairRequest
 	IP       string    `json:"ip"`
 	Confirm  string    `json:"confirm"`
 	Created  time.Time `json:"created"`
@@ -104,7 +106,10 @@ func (q *requests) purgeLocked() {
 // Request opens a request to pair, or returns the open one from the same phone (same
 // device id and address), so that retrying does not pop up a second dialog. retry is how
 // long to wait when the request is refused for being too frequent.
-func (p *Pairing) Request(device, deviceID, ip string, macDialog bool) (pp *PendingPair, retry time.Duration, err error) {
+//
+// forName is the person the phone says it is for, shown with its name.
+func (p *Pairing) Request(req pairRequest, forName, ip string, macDialog bool) (pp *PendingPair, retry time.Duration, err error) {
+	device, deviceID := req.Device, req.DeviceID
 	q := &p.rq
 	q.mu.Lock()
 	defer q.mu.Unlock()
@@ -128,7 +133,7 @@ func (p *Pairing) Request(device, deviceID, ip string, macDialog bool) (pp *Pend
 	now := q.now()
 	q.hits[ip] = append(q.hits[ip], now)
 	ctx, cancel := context.WithDeadline(context.Background(), now.Add(requestTTL))
-	pp = &PendingPair{ID: newToken()[:16], Device: device, DeviceID: deviceID, IP: ip, Confirm: randomDigits(4),
+	pp = &PendingPair{ID: newToken()[:16], Device: device, DeviceID: deviceID, For: forName, req: req, IP: ip, Confirm: randomDigits(4),
 		Created: now, Expires: now.Add(requestTTL), status: reqPending, done: make(chan struct{}), cancel: cancel}
 	q.byID[pp.ID] = pp
 	if macDialog && runtime.GOOS == "darwin" && q.popup != nil {
@@ -236,7 +241,7 @@ func (p *Pairing) Pending() []*PendingPair {
 func (p *Pairing) PendingInfo() []model.PendingPair {
 	out := []model.PendingPair{}
 	for _, pp := range p.Pending() {
-		out = append(out, model.PendingPair{ID: pp.ID, Device: pp.Device, IP: pp.IP, Confirm: pp.Confirm,
+		out = append(out, model.PendingPair{ID: pp.ID, Device: pp.Device, For: pp.For, IP: pp.IP, Confirm: pp.Confirm,
 			Created: pp.Created.Format(time.RFC3339), Expires: pp.Expires.Format(time.RFC3339)})
 	}
 	return out
@@ -245,7 +250,11 @@ func (p *Pairing) PendingInfo() []model.PendingPair {
 // macConfirm shows the native dialog. answered is false when nobody clicked: it gave up,
 // was closed because the request was answered elsewhere, or could not be shown at all.
 func macConfirm(ctx context.Context, pp *PendingPair) (allowed, answered bool) {
-	device := strings.NewReplacer(`"`, "'", `\`, "").Replace(pp.Device)
+	device := pp.Device
+	if pp.For != "" {
+		device += ", for " + pp.For
+	}
+	device = strings.NewReplacer(`"`, "'", `\`, "").Replace(device)
 	wait := int(time.Until(pp.Expires).Seconds())
 	if wait < 1 {
 		return false, false

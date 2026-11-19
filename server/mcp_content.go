@@ -153,7 +153,7 @@ const schemaDoc = "# health.db\n\n" +
 
 var summaryTypes = []string{"StepCount", "ActiveEnergyBurned", "RestingHeartRate", "HeartRateVariabilitySDNN", "BodyMass", "OxygenSaturation"}
 
-func (m *MCP) readResource(uri string) (map[string]any, error) {
+func (m *mcpDB) readResource(uri string) (map[string]any, error) {
 	text := func(mime, s string) map[string]any { return map[string]any{"uri": uri, "mimeType": mime, "text": s} }
 	asJSON := func(v any, err error) (map[string]any, error) {
 		if err != nil {

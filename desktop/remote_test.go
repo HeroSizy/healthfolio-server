@@ -68,11 +68,11 @@ func TestRemoteReadsAndChanges(t *testing.T) {
 		End: "2026-11-01T08:10:00+08:00", Value: "500", Unit: "count", Source: "phone"}}); err != nil {
 		t.Fatal(err)
 	}
-	o := r.Overview()
+	o := r.Overview("")
 	if o.Name != "test box" || o.Stats.Total != 1 || !o.MCPEnabled {
 		t.Fatalf("overview: %+v", o)
 	}
-	if d, err := r.Daily("HKQuantityTypeIdentifierStepCount", 3650); err != nil || len(d) != 1 || d[0].Total != 500 {
+	if d, err := r.Daily("", "HKQuantityTypeIdentifierStepCount", 3650); err != nil || len(d) != 1 || d[0].Total != 500 {
 		t.Fatalf("daily: %+v %v", d, err)
 	}
 
@@ -123,18 +123,18 @@ func TestRemoteReadsAndChanges(t *testing.T) {
 
 	// AI access off: shown off at once, and the server agrees
 	r.SetMCPEnabled(false)
-	if r.Overview().MCPEnabled {
+	if r.Overview("").MCPEnabled {
 		t.Fatal("MCP still shown on right after turning it off")
 	}
 	wait(t)
-	if r.Overview().MCPEnabled || db.MCPEnabled() {
+	if r.Overview("").MCPEnabled || db.MCPEnabled() {
 		t.Fatal("MCP still on")
 	}
 
 	if logs, err := r.Logs(50, 0, "pair"); err != nil || len(logs) == 0 {
 		t.Fatalf("logs: %v %v", logs, err)
 	}
-	if reps, err := r.Reports(); err != nil || reps == nil && err != nil {
+	if reps, err := r.Reports(""); err != nil || reps == nil && err != nil {
 		t.Fatalf("reports: %v %v", reps, err)
 	}
 	r.LoadSkill()
@@ -155,7 +155,7 @@ func TestRemoteUnreachable(t *testing.T) {
 	ts.Close()
 	var failed error
 	r.Failed = func(err error) { failed = err }
-	if o := r.Overview(); o.Name != "" || failed == nil {
+	if o := r.Overview(""); o.Name != "" || failed == nil {
 		t.Fatalf("overview of a stopped server: %+v %v", o, failed)
 	}
 	if _, err := r.Devices(); err == nil {
@@ -176,21 +176,21 @@ func TestRemoteReportPage(t *testing.T) {
 	if res, err := http.DefaultClient.Do(req); err != nil || res.StatusCode != 200 {
 		t.Fatalf("report: %v %v", res, err)
 	}
-	d, err := r.ReportDetail("R9")
+	d, err := r.ReportDetail("", "R9")
 	if err != nil || len(d.Report.Items) != 1 || d.Report.Items[0].Location.File != "photo.jpg" || len(d.Files) != 1 {
 		t.Fatalf("detail: %+v %v", d, err)
 	}
 	if valueText(d.Report.Items[0].Value) != "3.9" || !flagged.MatchString(d.Report.Items[0].Flag) {
 		t.Fatalf("item: %+v", d.Report.Items[0])
 	}
-	img, err := r.ReportPage("R9", "photo.jpg", 0, 800)
+	img, err := r.ReportPage("", "R9", "photo.jpg", 0, 800)
 	if err != nil || img.Pages != 1 || img.Type != "image/jpeg" || !bytes.Equal(img.Data, jb.Bytes()) {
 		t.Fatalf("page: %v %v", img.Type, err)
 	}
-	if _, err := r.ReportPage("R9", "photo.jpg", 3, 800); err == nil {
+	if _, err := r.ReportPage("", "R9", "photo.jpg", 3, 800); err == nil {
 		t.Fatal("page 4 of a photo")
 	}
-	if _, err := r.ReportDetail("nope"); err == nil {
+	if _, err := r.ReportDetail("", "nope"); err == nil {
 		t.Fatal("unknown report")
 	}
 }

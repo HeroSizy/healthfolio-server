@@ -41,7 +41,7 @@ var mcpFileTools = []tool{
 // mcpContent is a tool answer that is not JSON text, such as a file.
 type mcpContent []any
 
-func (m *MCP) callFiles(name string, a map[string]any) (any, bool, error) {
+func (m *mcpDB) callFiles(name string, a map[string]any) (any, bool, error) {
 	switch name {
 	case "list_checkup_reports":
 		rows, err := m.rows(`SELECT r.id, r.date, r.institution, r.title, r.items, r.folder, r.originals,

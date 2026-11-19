@@ -78,8 +78,28 @@ func writeFileAtomic(path string, data []byte) error {
 	return nil
 }
 
-func (s *Server) chatsDir() string    { return filepath.Join(s.cfg.DataDir, "chats") }
-func (s *Server) settingsDir() string { return filepath.Join(s.cfg.DataDir, "settings") }
+// chatsDir and settingsDir are person n's folders: in the data folder for the owner, in
+// people/<n>/ for everyone else.
+func (s *Server) chatsDir(n int64) string {
+	return filepath.Join(personDir(s.cfg.DataDir, n), "chats")
+}
+func (s *Server) settingsDir(n int64) string {
+	return filepath.Join(personDir(s.cfg.DataDir, n), "settings")
+}
+
+// chatsFor checks the phone's token and finds the chats folder of the person the call is
+// for (?person=, the phone's own without).
+func (s *Server) chatsFor(w http.ResponseWriter, r *http.Request) (Device, Person, string, bool) {
+	dev, ok := s.authPhone(w, r, "/backup/chats")
+	if !ok {
+		return dev, Person{}, "", false
+	}
+	p, _, ok := s.target(w, r, dev)
+	if !ok {
+		return dev, p, "", false
+	}
+	return dev, p, s.chatsDir(p.Num), true
+}
 
 func readBody(w http.ResponseWriter, r *http.Request, limit int64) ([]byte, bool) {
 	if r.ContentLength > limit {
@@ -97,7 +117,7 @@ func readBody(w http.ResponseWriter, r *http.Request, limit int64) ([]byte, bool
 // POST /backup/chats
 func (s *Server) handleBackupChats(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
-	dev, ok := s.authPhone(w, r, "/backup/chats")
+	dev, person, dir, ok := s.chatsFor(w, r)
 	if !ok {
 		return
 	}
@@ -148,13 +168,13 @@ func (s *Server) handleBackupChats(w http.ResponseWriter, r *http.Request) {
 			pretty.Reset()
 			pretty.Write(raw)
 		}
-		if err := writeFileAtomic(filepath.Join(s.chatsDir(), chatFile(ids[i])), pretty.Bytes()); err != nil {
+		if err := writeFileAtomic(filepath.Join(dir, chatFile(ids[i])), pretty.Bytes()); err != nil {
 			errJSON(w, 500, err.Error())
 			return
 		}
 	}
-	s.db.Log(LogEntry{Kind: "backup", Device: dev.Name, IP: clientIP(r), OK: true, Received: len(ids), Added: len(ids),
-		Bytes: len(body), DurationMS: int(time.Since(start).Milliseconds()), Message: fmt.Sprintf("%d AI chat(s)", len(ids))})
+	s.db.Log(logPerson(LogEntry{Kind: "backup", Device: dev.Name, IP: clientIP(r), OK: true, Received: len(ids), Added: len(ids),
+		Bytes: len(body), DurationMS: int(time.Since(start).Milliseconds()), Message: fmt.Sprintf("%d AI chat(s)", len(ids))}, person))
 	writeJSON(w, 200, map[string]any{"ok": true, "saved": len(ids), "ids": ids})
 }
 
@@ -167,16 +187,17 @@ type chatInfo struct {
 
 // GET /backup/chats
 func (s *Server) handleListChats(w http.ResponseWriter, r *http.Request) {
-	if _, ok := s.authPhone(w, r, "/backup/chats"); !ok {
+	_, _, dir, ok := s.chatsFor(w, r)
+	if !ok {
 		return
 	}
-	entries, _ := os.ReadDir(s.chatsDir())
+	entries, _ := os.ReadDir(dir)
 	out := []chatInfo{}
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") || strings.HasPrefix(e.Name(), ".") {
 			continue
 		}
-		b, err := os.ReadFile(filepath.Join(s.chatsDir(), e.Name()))
+		b, err := os.ReadFile(filepath.Join(dir, e.Name()))
 		if err != nil {
 			continue
 		}
@@ -198,10 +219,11 @@ func (s *Server) handleListChats(w http.ResponseWriter, r *http.Request) {
 
 // GET /backup/chats/{id}
 func (s *Server) handleGetChat(w http.ResponseWriter, r *http.Request) {
-	if _, ok := s.authPhone(w, r, "/backup/chats"); !ok {
+	_, _, dir, ok := s.chatsFor(w, r)
+	if !ok {
 		return
 	}
-	b, err := os.ReadFile(filepath.Join(s.chatsDir(), chatFile(r.PathValue("id"))))
+	b, err := os.ReadFile(filepath.Join(dir, chatFile(r.PathValue("id"))))
 	if err != nil {
 		errJSON(w, 404, "no such chat")
 		return
@@ -211,14 +233,14 @@ func (s *Server) handleGetChat(w http.ResponseWriter, r *http.Request) {
 }
 
 // removeChats deletes the backups of ids and returns those that were there.
-func (s *Server) removeChats(ids []string) (deleted, missing []string, err error) {
+func removeChats(dir string, ids []string) (deleted, missing []string, err error) {
 	deleted, missing = []string{}, []string{}
 	for _, id := range ids {
 		id = strings.TrimSpace(id)
 		if id == "" {
 			continue
 		}
-		switch e := os.Remove(filepath.Join(s.chatsDir(), chatFile(id))); {
+		switch e := os.Remove(filepath.Join(dir, chatFile(id))); {
 		case e == nil:
 			deleted = append(deleted, id)
 		case os.IsNotExist(e):
@@ -233,11 +255,11 @@ func (s *Server) removeChats(ids []string) (deleted, missing []string, err error
 // DELETE /backup/chats/{id}: 200 either way, so deleting twice is fine; "deleted" says
 // whether there was a backup.
 func (s *Server) handleDeleteChat(w http.ResponseWriter, r *http.Request) {
-	dev, ok := s.authPhone(w, r, "/backup/chats")
+	dev, _, dir, ok := s.chatsFor(w, r)
 	if !ok {
 		return
 	}
-	deleted, _, err := s.removeChats([]string{r.PathValue("id")})
+	deleted, _, err := removeChats(dir, []string{r.PathValue("id")})
 	if err != nil {
 		errJSON(w, 500, err.Error())
 		return
@@ -250,7 +272,7 @@ func (s *Server) handleDeleteChat(w http.ResponseWriter, r *http.Request) {
 
 // POST /backup/chats/delete {"ids": [...]}
 func (s *Server) handleDeleteChats(w http.ResponseWriter, r *http.Request) {
-	dev, ok := s.authPhone(w, r, "/backup/chats")
+	dev, _, dir, ok := s.chatsFor(w, r)
 	if !ok {
 		return
 	}
@@ -271,7 +293,7 @@ func (s *Server) handleDeleteChats(w http.ResponseWriter, r *http.Request) {
 			ids = append(ids, fmt.Sprint(v))
 		}
 	}
-	deleted, missing, err := s.removeChats(ids)
+	deleted, missing, err := removeChats(dir, ids)
 	if err != nil {
 		errJSON(w, 500, err.Error())
 		return
@@ -312,13 +334,14 @@ func dropSecrets(v any, path string) []string {
 	return dropped
 }
 
-// settingsFile is one file per paired phone; the shared token has its own.
+// settingsFile is one file per paired phone, in the folder of the person it belongs to; the
+// shared token has its own.
 func (s *Server) settingsFile(dev Device) string {
 	name := "shared-token.json"
 	if dev.ID != 0 {
 		name = fmt.Sprintf("device-%d.json", dev.ID)
 	}
-	return filepath.Join(s.settingsDir(), name)
+	return filepath.Join(s.settingsDir(max(dev.PersonNum, ownerNum)), name)
 }
 
 // POST /backup/settings
@@ -355,23 +378,24 @@ func (s *Server) handleBackupSettings(w http.ResponseWriter, r *http.Request) {
 }
 
 // GET /backup/settings: this phone's settings, or, for a phone that never sent any (a new
-// one), the settings saved most recently by any phone.
+// one), the settings saved most recently by any phone of the same person.
 func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 	dev, ok := s.authPhone(w, r, "/backup/settings")
 	if !ok {
 		return
 	}
+	dir := s.settingsDir(max(dev.PersonNum, ownerNum))
 	b, err := os.ReadFile(s.settingsFile(dev))
 	if err != nil {
 		var newest time.Time
-		entries, _ := os.ReadDir(s.settingsDir())
+		entries, _ := os.ReadDir(dir)
 		for _, e := range entries {
 			info, ierr := e.Info()
 			if ierr != nil || e.IsDir() || !strings.HasSuffix(e.Name(), ".json") || strings.HasPrefix(e.Name(), ".") {
 				continue
 			}
 			if info.ModTime().After(newest) {
-				if nb, rerr := os.ReadFile(filepath.Join(s.settingsDir(), e.Name())); rerr == nil {
+				if nb, rerr := os.ReadFile(filepath.Join(dir, e.Name())); rerr == nil {
 					b, err, newest = nb, nil, info.ModTime()
 				}
 			}

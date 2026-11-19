@@ -24,6 +24,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -48,21 +49,213 @@ type rpcErr struct {
 	Message string `json:"message"`
 }
 
+// MCP serves the tools over the data of every person on the server (people.go). Each call
+// reads one person's database; whom a caller may see is its mcpScope.
 type MCP struct {
-	db  *sql.DB // read-only connection
-	dir string  // the data folder: chats/, settings/ (reports know their own folders)
+	main *sql.DB // read-only connection to health.db: the people, the prefs and the owner's data
+	dir  string  // the data folder
+	// ensure makes a person's database when it is not there yet (the server sets it; the
+	// stdio transport only reads what exists)
+	ensure func(n int64) (*DB, error)
+
+	mu  sync.Mutex
+	dbs map[int64]*sql.DB // read-only connections to the other people's databases
+}
+
+// mcpDB is one person's data, as the tools read it.
+type mcpDB struct {
+	db  *sql.DB
+	dir string // the person's folder: chats/, settings/ (reports know their own folders)
+	who Person
+}
+
+// mcpScope is whom a caller may see: everyone, or one person.
+type mcpScope struct {
+	all    bool
+	person int64
+}
+
+var everyone = mcpScope{all: true}
+
+func openRO(path string) (*sql.DB, error) {
+	return sql.Open("sqlite", "file:"+path+"?mode=ro&_pragma=query_only(1)&_pragma=busy_timeout(10000)")
 }
 
 func OpenMCP(dbPath string) (*MCP, error) {
-	db, err := sql.Open("sqlite", "file:"+dbPath+"?mode=ro&_pragma=query_only(1)&_pragma=busy_timeout(10000)")
+	db, err := openRO(dbPath)
 	if err != nil {
 		return nil, err
 	}
-	return &MCP{db: db, dir: filepath.Dir(dbPath)}, db.Ping()
+	return &MCP{main: db, dir: filepath.Dir(dbPath), dbs: map[int64]*sql.DB{}}, db.Ping()
 }
 
+// Close closes every connection.
+func (m *MCP) Close() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for n, db := range m.dbs {
+		db.Close()
+		delete(m.dbs, n)
+	}
+	m.main.Close()
+}
+
+// closePerson closes the connection to person n's database (deleted or merged).
+func (m *MCP) closePerson(n int64) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if db := m.dbs[n]; db != nil {
+		db.Close()
+		delete(m.dbs, n)
+	}
+}
+
+// open is person p's data.
+func (m *MCP) open(p Person) (*mcpDB, error) {
+	if p.Num <= ownerNum {
+		return &mcpDB{db: m.main, dir: m.dir, who: p}, nil
+	}
+	dir := personDir(m.dir, p.Num)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if db := m.dbs[p.Num]; db != nil {
+		return &mcpDB{db: db, dir: dir, who: p}, nil
+	}
+	path := filepath.Join(dir, "health.db")
+	if _, err := os.Stat(path); err != nil {
+		if m.ensure == nil {
+			return nil, fmt.Errorf("%s has no data on this server yet", personLabel(p))
+		}
+		if _, err := m.ensure(p.Num); err != nil {
+			return nil, err
+		}
+	}
+	db, err := openRO(path)
+	if err != nil {
+		return nil, err
+	}
+	m.dbs[p.Num] = db
+	return &mcpDB{db: db, dir: dir, who: p}, nil
+}
+
+// visible is the people sc may see, the owner first.
+func (m *MCP) visible(sc mcpScope) ([]Person, error) {
+	rows, err := m.main.Query(`SELECT ` + personCols + ` FROM people ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []Person{}
+	for rows.Next() {
+		p, err := scanPerson(rows)
+		if err != nil {
+			return nil, err
+		}
+		if sc.all || p.Num == sc.person {
+			out = append(out, p)
+		}
+	}
+	return out, rows.Err()
+}
+
+// pick is the person a call names, among those sc may see. Without a name it is the only
+// one there is; when there are several it asks for one, rather than guess (lenient: the
+// owner, for resources, which take no arguments).
+func (m *MCP) pick(sc mcpScope, key string, lenient bool) (*mcpDB, error) {
+	vis, err := m.visible(sc)
+	if err != nil {
+		return nil, err
+	}
+	if len(vis) == 0 {
+		return nil, fmt.Errorf("this token may not see anyone's data")
+	}
+	if key == "" {
+		if len(vis) == 1 {
+			return m.open(vis[0])
+		}
+		if lenient && vis[0].Owner {
+			return m.open(vis[0])
+		}
+		names := []string{}
+		for _, p := range vis {
+			names = append(names, fmt.Sprintf("%s (%s)", personLabel(p), p.ID))
+		}
+		return nil, fmt.Errorf("this server keeps the health data of %d people: %s. Pass person with one of these ids (see list_people)",
+			len(vis), strings.Join(names, ", "))
+	}
+	var n int64
+	if err := m.main.QueryRow(`SELECT person FROM person_keys WHERE key = ?`, key).Scan(&n); err != nil {
+		// a name works too, when it is unambiguous
+		var hits []Person
+		for _, p := range vis {
+			if strings.EqualFold(p.Name, key) {
+				hits = append(hits, p)
+			}
+		}
+		if len(hits) == 1 {
+			return m.open(hits[0])
+		}
+		return nil, fmt.Errorf("no person %q; call list_people", key)
+	}
+	for _, p := range vis {
+		if p.Num == n {
+			return m.open(p)
+		}
+	}
+	return nil, fmt.Errorf("no person %q; call list_people", key)
+}
+
+// listPeople is the list_people tool.
+func (m *MCP) listPeople(sc mcpScope) (any, error) {
+	vis, err := m.visible(sc)
+	if err != nil {
+		return nil, err
+	}
+	out := []map[string]any{}
+	for _, p := range vis {
+		row := map[string]any{"person": p.ID, "name": p.Name, "relation": p.Relation, "birth": p.Birth, "sex": p.Sex, "owner": p.Owner}
+		if d, err := m.open(p); err == nil {
+			var n int
+			var last, rep sql.NullString
+			_ = d.db.QueryRow(`SELECT COUNT(*), MAX(start) FROM records WHERE deleted_at IS NULL`).Scan(&n, &last)
+			row["records"], row["latest_record"] = n, last.String
+			_ = d.db.QueryRow(`SELECT COUNT(*), MAX(date) FROM reports`).Scan(&n, &rep)
+			row["reports"], row["latest_report"] = n, rep.String
+		}
+		out = append(out, row)
+	}
+	return out, nil
+}
+
+// personProp is the argument every tool but list_people takes.
+var personProp = prop("string", "Whose data: a person id from list_people (or a name). Required when this server keeps the data of more than one person.")
+
 // allTools is every tool the server offers.
-func allTools() []tool { return append(append([]tool{}, mcpTools...), mcpFileTools...) }
+func allTools() []tool {
+	out := []tool{listPeopleTool}
+	for _, t := range append(append([]tool{}, mcpTools...), mcpFileTools...) {
+		schema := map[string]any{}
+		for k, v := range t.InputSchema {
+			schema[k] = v
+		}
+		props := map[string]any{"person": personProp}
+		for k, v := range t.InputSchema["properties"].(map[string]any) {
+			props[k] = v
+		}
+		schema["properties"] = props
+		t.InputSchema = schema
+		out = append(out, t)
+	}
+	return out
+}
+
+var listPeopleTool = tool{Name: "list_people", Title: "People",
+	Description: "Lists the people whose health data this server keeps (the user and their family): id, name, relation, birth, sex, " +
+		"how many records and checkup reports each has. Every other tool reads one person: pass their id as person. Call this first.",
+	InputSchema: obj(map[string]any{}), Annotations: readOnly}
 
 type tool struct {
 	Name        string         `json:"name"`
@@ -114,8 +307,12 @@ var mcpTools = []tool{
 		InputSchema: obj(map[string]any{"sql": prop("string", "A single SELECT statement")}, "sql"), Annotations: readOnly},
 }
 
-// Handle processes one JSON-RPC message. It returns nil for notifications.
-func (m *MCP) Handle(raw []byte) *rpcResp {
+// Handle processes one JSON-RPC message for a caller that sees everyone. It returns nil
+// for notifications.
+func (m *MCP) Handle(raw []byte) *rpcResp { return m.HandleFor(everyone, raw) }
+
+// HandleFor is Handle for a caller that may see only whom sc says.
+func (m *MCP) HandleFor(sc mcpScope, raw []byte) *rpcResp {
 	var req rpcReq
 	if err := json.Unmarshal(raw, &req); err != nil {
 		return &rpcResp{JSONRPC: "2.0", ID: json.RawMessage("null"), Error: &rpcErr{-32700, "parse error"}}
@@ -124,7 +321,7 @@ func (m *MCP) Handle(raw []byte) *rpcResp {
 		return nil
 	}
 	resp := &rpcResp{JSONRPC: "2.0", ID: req.ID}
-	if req.Method != "ping" && !mcpEnabled(m.db) {
+	if req.Method != "ping" && !mcpEnabled(m.main) {
 		resp.Error = &rpcErr{-32001, mcpOffMessage}
 		return resp
 	}
@@ -143,8 +340,10 @@ func (m *MCP) Handle(raw []byte) *rpcResp {
 			"capabilities":    map[string]any{"tools": map[string]any{}, "prompts": map[string]any{}, "resources": map[string]any{}},
 			"serverInfo":      map[string]any{"name": "healthsync", "title": "Healthfolio", "version": version},
 			"instructions": "Personal Apple Health data synced from the user's iPhone, plus medical checkup results with their original PDFs and photos, " +
-				"and the conversations and settings of the Healthfolio iPhone app. Start with list_data_types (or list_checkup_reports for checkups). Times are ISO 8601 with the phone's time zone. This is the user's private health data: " +
-				"answer their questions, don't speculate beyond what the data shows, and suggest a doctor for medical decisions.",
+				"and the conversations and settings of the Healthfolio iPhone app. The server may keep the data of several people (a family), each apart: " +
+				"call list_people first, and pass person to the other tools; never mix one person's data with another's. " +
+				"Then start with list_data_types (or list_checkup_reports for checkups). Times are ISO 8601 with the phone's time zone. This is private health data: " +
+				"answer the user's questions, don't speculate beyond what the data shows, and suggest a doctor for medical decisions.",
 		}
 	case "ping":
 		resp.Result = map[string]any{}
@@ -159,7 +358,16 @@ func (m *MCP) Handle(raw []byte) *rpcResp {
 			resp.Error = &rpcErr{-32602, "invalid params"}
 			break
 		}
-		out, err := m.call(p.Name, p.Arguments)
+		var out any
+		var err error
+		if p.Name == "list_people" {
+			out, err = m.listPeople(sc)
+		} else {
+			var d *mcpDB
+			if d, err = m.pick(sc, argStr(p.Arguments, "person"), false); err == nil {
+				out, err = d.call(p.Name, p.Arguments)
+			}
+		}
 		if err != nil {
 			resp.Result = map[string]any{"isError": true, "content": []any{map[string]any{"type": "text", "text": err.Error()}}}
 			break
@@ -193,7 +401,16 @@ func (m *MCP) Handle(raw []byte) *rpcResp {
 			URI string `json:"uri"`
 		}
 		_ = json.Unmarshal(req.Params, &p)
-		out, err := m.readResource(p.URI)
+		// a resource is the owner's, or ?person=<id> at the end of its address
+		uri, key, _ := strings.Cut(p.URI, "?person=")
+		d, err := m.pick(sc, key, true)
+		var out map[string]any
+		if err == nil {
+			out, err = d.readResource(uri)
+		}
+		if err == nil {
+			out["uri"] = p.URI
+		}
 		if err != nil {
 			resp.Error = &rpcErr{-32002, err.Error()}
 			break
@@ -213,7 +430,7 @@ func argStr(a map[string]any, k string) string {
 }
 
 // resolveType accepts "StepCount", "stepcount" or the full HK identifier.
-func (m *MCP) resolveType(t string) (string, error) {
+func (m *mcpDB) resolveType(t string) (string, error) {
 	if t == "" {
 		return "", fmt.Errorf("type is required")
 	}
@@ -225,7 +442,7 @@ func (m *MCP) resolveType(t string) (string, error) {
 	return full, err
 }
 
-func (m *MCP) call(name string, a map[string]any) (any, error) {
+func (m *mcpDB) call(name string, a map[string]any) (any, error) {
 	if out, ok, err := m.callFiles(name, a); ok {
 		return out, err
 	}
@@ -290,7 +507,7 @@ func (m *MCP) call(name string, a map[string]any) (any, error) {
 // table would otherwise keep a CPU core busy for hours.
 const queryTimeout = 15 * time.Second
 
-func (m *MCP) rows(q string, args ...any) ([]map[string]any, error) {
+func (m *mcpDB) rows(q string, args ...any) ([]map[string]any, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), queryTimeout)
 	defer cancel()
 	rs, err := m.db.QueryContext(ctx, q, args...)
@@ -311,7 +528,7 @@ func timeoutErr(ctx context.Context, err error) error {
 
 // hiddenTables hold the server's own bookkeeping, not health data: the paired devices (with
 // their token hashes and addresses) and the server's preferences. query_sql may not read them.
-var hiddenTables = map[string]bool{"devices": true, "prefs": true}
+var hiddenTables = map[string]bool{"devices": true, "prefs": true, "people": true, "person_keys": true}
 
 // sqlPolicy is the SQLite authorizer for query_sql: reading and computing only, nothing
 // from hiddenTables, no client addresses from sync_log, and no functions that touch
@@ -349,7 +566,7 @@ func sqlPolicy(action sqlite.AuthorizerActionCode, arg1, arg2, _, _ string) sqli
 
 // userQuery runs SQL written by an AI assistant on its own connection, under sqlPolicy and
 // queryTimeout.
-func (m *MCP) userQuery(q string) ([]map[string]any, error) {
+func (m *mcpDB) userQuery(q string) ([]map[string]any, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), queryTimeout)
 	defer cancel()
 	conn, err := m.db.Conn(ctx)
@@ -421,9 +638,15 @@ func (s *Server) handleMCP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if _, ok := s.authDevice(r); !ok {
+	dev, ok := s.authDevice(r)
+	if !ok {
 		w.Header().Set("WWW-Authenticate", `Bearer realm="Healthfolio"`)
 		errJSON(w, 401, "bad token")
+		return
+	}
+	sc := mcpScope{all: seesEveryone(dev), person: dev.PersonNum}
+	if !sc.all && sc.person == 0 {
+		errJSON(w, 403, "this token belongs to no person")
 		return
 	}
 	if !s.db.MCPEnabled() {
@@ -448,7 +671,7 @@ func (s *Server) handleMCP(w http.ResponseWriter, r *http.Request) {
 		}
 		var out []*rpcResp
 		for _, m := range msgs {
-			if r := s.mcp.Handle(m); r != nil {
+			if r := s.mcp.HandleFor(sc, m); r != nil {
 				out = append(out, r)
 			}
 		}
@@ -459,7 +682,7 @@ func (s *Server) handleMCP(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, out)
 		return
 	}
-	resp := s.mcp.Handle(body)
+	resp := s.mcp.HandleFor(sc, body)
 	if resp == nil {
 		w.WriteHeader(http.StatusAccepted)
 		return
@@ -509,6 +732,7 @@ func RunMCPStdio(cfg *Config) error {
 	if err != nil {
 		return err
 	}
+	defer m.Close()
 	return m.ServeStdio(os.Stdin, os.Stdout)
 }
 
@@ -540,9 +764,10 @@ func mcpConnect(serverName, url, token string) MCPConnect {
 - Server: Healthfolio on %s
 - Transport: Streamable HTTP, JSON-RPC 2.0, POST %s
 - Auth header: Authorization: %s
-- Tools: list_data_types, daily_summary, get_records, get_checkups, list_checkup_reports, get_report_file, list_ai_chats, get_ai_chat, get_app_settings, query_sql
+- Tools: list_people, list_data_types, daily_summary, get_records, get_checkups, list_checkup_reports, get_report_file, list_ai_chats, get_ai_chat, get_app_settings, query_sql
 
-Start with list_data_types to see which Apple Health types exist, then use daily_summary for trends.
+Start with list_people: the server may keep the data of several people in my family, and each tool reads one of them (the person argument).
+Then use list_data_types to see which Apple Health types exist, and daily_summary for trends.
 The server is on my home network (plain HTTP); you must run on a machine in the same network or over my VPN.
 This is private health data: only use it to answer my questions.`, serverName, url, auth)},
 	}
@@ -569,7 +794,8 @@ func (s *Server) handleMCPToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Name string `json:"name"`
+		Name   string `json:"name"`
+		Person string `json:"person"`
 	}
 	_ = json.NewDecoder(io.LimitReader(r.Body, 1024)).Decode(&req)
 	name := cleanName(req.Name)
@@ -582,8 +808,26 @@ func (s *Server) handleMCPToken(w http.ResponseWriter, r *http.Request) {
 	if rr := []rune(name); len(rr) > 80 {
 		name = string(rr[:80])
 	}
+	// whom the token sees: the person asked for; without one, everyone for a phone that may
+	// manage the family, else the phone's own person
+	person := dev.PersonNum
+	if dev.Family {
+		person = 0
+	}
+	if key := firstNonEmpty(strings.TrimSpace(req.Person), personParam(r)); key != "" {
+		p, found := s.db.personByKey(key)
+		if !found {
+			writeJSON(w, 404, map[string]any{"error": "no such person", "reason": "unknown_person"})
+			return
+		}
+		if !canAccess(dev, p.Num) {
+			writeJSON(w, 403, map[string]any{"error": "this phone may only make AI tokens for its own person", "reason": "person_not_allowed"})
+			return
+		}
+		person = p.Num
+	}
 	tok := newToken()
-	if _, _, err := s.db.AddDevice(name, tok, clientIP(r), "", scopeMCP); err != nil {
+	if _, _, err := s.db.AddDevice(name, tok, clientIP(r), "", scopeMCP, person, false); err != nil {
 		errJSON(w, 500, err.Error())
 		return
 	}

@@ -57,7 +57,7 @@ func TestReportPages(t *testing.T) {
 	}
 
 	// the detail, as the window reads it
-	d, err := s.reportDetail("R2")
+	d, err := s.reportDetail(s.db, "R2")
 	if err != nil || len(d.Report.Items) != 1 || d.Report.Items[0].Location == nil || len(d.Files) != 3 {
 		t.Fatalf("detail: %+v %v", d, err)
 	}
@@ -126,7 +126,7 @@ func TestPageRendererStopsWhenIdle(t *testing.T) {
 	if code, _ := do(t, "POST", ts.URL+"/report", "master", body); code != 200 {
 		t.Fatal(code)
 	}
-	if _, err := s.reportPage("R3", "a.pdf", 1, 300); err != nil {
+	if _, err := s.reportPage(s.db, "R3", "a.pdf", 1, 300); err != nil {
 		t.Fatal(err)
 	}
 	pages.mu.Lock()
@@ -138,7 +138,7 @@ func TestPageRendererStopsWhenIdle(t *testing.T) {
 	if !running {
 		t.Fatal("PDFium was not running after a page")
 	}
-	if img, err := s.reportPage("R3", "a.pdf", 0, 300); err != nil || img.Pages != 2 {
+	if img, err := s.reportPage(s.db, "R3", "a.pdf", 0, 300); err != nil || img.Pages != 2 {
 		t.Fatalf("after a stop: %+v %v", img.Pages, err)
 	}
 }

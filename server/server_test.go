@@ -42,6 +42,7 @@ func newTestServer(t *testing.T) (*Server, *httptest.Server) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { s.mcp.Close(); s.closePeople() })
 	ts := httptest.NewServer(s)
 	t.Cleanup(ts.Close)
 	return s, ts

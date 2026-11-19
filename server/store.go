@@ -70,6 +70,15 @@ CREATE TABLE IF NOT EXISTS devices (
 CREATE TABLE IF NOT EXISTS reports (
     id TEXT PRIMARY KEY, date TEXT, institution TEXT, items INTEGER, folder TEXT, received TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS prefs (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+
+-- people: the server's own health.db keeps the list; person 1 (the owner) has their data in
+-- that same file, everyone else in people/<id>/health.db. person_keys maps every id the app
+-- sent for a person (and "me" for the owner) to the person.
+CREATE TABLE IF NOT EXISTS people (
+    id INTEGER PRIMARY KEY, key TEXT NOT NULL UNIQUE, name TEXT NOT NULL DEFAULT '',
+    relation TEXT NOT NULL DEFAULT '', birth TEXT NOT NULL DEFAULT '', sex TEXT NOT NULL DEFAULT '',
+    created TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS person_keys (key TEXT PRIMARY KEY, person INTEGER NOT NULL);
 `
 
 // MCPEnabled reports whether AI assistants may connect. It is on unless turned off in the
@@ -211,10 +220,34 @@ func migrate(db *sql.DB) error {
 	if err := addColumns(db, "devices", [][2]string{{"device_id", "TEXT"}, {"scope", "TEXT NOT NULL DEFAULT 'device'"}}); err != nil {
 		return err
 	}
+	// people: every device paired before belongs to the owner (person 1), and the phones
+	// among them keep doing what they did, which was everything: they may manage the family.
+	// AI tokens made before see everyone (person NULL), as before.
+	hadPerson, err := hasColumn(db, "devices", "person")
+	if err != nil {
+		return err
+	}
+	if err := addColumns(db, "devices", [][2]string{{"person", "INTEGER"}, {"family", "INTEGER NOT NULL DEFAULT 0"}}); err != nil {
+		return err
+	}
+	if !hadPerson {
+		if _, err := db.Exec(`UPDATE devices SET person = 1, family = 1 WHERE scope = 'device'`); err != nil {
+			return err
+		}
+	}
+	if err := addColumns(db, "sync_log", [][2]string{{"person", "TEXT"}, {"person_num", "INTEGER"}}); err != nil {
+		return err
+	}
+	if _, err := db.Exec(`INSERT OR IGNORE INTO people (id, key, created) VALUES (1, 'me', ?)`, nowISO()); err != nil {
+		return err
+	}
+	if _, err := db.Exec(`INSERT OR IGNORE INTO person_keys (key, person) VALUES ('me', 1)`); err != nil {
+		return err
+	}
 	if _, err := db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS devices_device_id ON devices(device_id) WHERE device_id IS NOT NULL`); err != nil {
 		return err
 	}
-	_, err := db.Exec(views)
+	_, err = db.Exec(views)
 	return err
 }
 
@@ -266,6 +299,12 @@ func dropCheckupUnique(db *sql.DB) error {
 		}
 	}
 	return nil
+}
+
+func hasColumn(db *sql.DB, table, col string) (bool, error) {
+	var n int
+	err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info(?) WHERE name = ?`, table, col).Scan(&n)
+	return n > 0, err
 }
 
 // addColumns adds the columns table is missing.
@@ -609,8 +648,13 @@ func (d *DB) Log(e LogEntry) {
 		return
 	}
 	types, _ := json.Marshal(e.Types)
-	_, _ = d.sql.Exec(`INSERT INTO sync_log (time, kind, device, ip, received, added, bytes, duration_ms, ok, message, types)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?)`, e.Time, e.Kind, e.Device, e.IP, e.Received, e.Added, e.Bytes, e.DurationMS, e.OK, e.Message, string(types))
+	var pnum any
+	if e.PersonNum > 0 {
+		pnum = e.PersonNum
+	}
+	_, _ = d.sql.Exec(`INSERT INTO sync_log (time, kind, device, ip, received, added, bytes, duration_ms, ok, message, types, person, person_num)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`, e.Time, e.Kind, e.Device, e.IP, e.Received, e.Added, e.Bytes, e.DurationMS, e.OK, e.Message, string(types),
+		nullable(e.Person), pnum)
 	// keep the log bounded
 	_, _ = d.sql.Exec(`DELETE FROM sync_log WHERE id <= (SELECT MAX(id) FROM sync_log) - 20000`)
 	if d.onLog != nil {
@@ -632,10 +676,11 @@ func (d *DB) mergeIngest(e LogEntry) bool {
 	)
 	var kind string
 	var ok bool
+	var pnum int64
 	err := d.sql.QueryRow(`SELECT id, time, kind, ok, COALESCE(device,''), COALESCE(types,'[]'), COALESCE(message,''),
-			COALESCE(received,0), COALESCE(added,0), COALESCE(bytes,0), COALESCE(duration_ms,0)
-		FROM sync_log ORDER BY id DESC LIMIT 1`).Scan(&id, &t, &kind, &ok, &device, &typesJSON, &msg, &received, &added, &bytes, &durMS)
-	if err != nil || kind != "ingest" || !ok || device != e.Device {
+			COALESCE(received,0), COALESCE(added,0), COALESCE(bytes,0), COALESCE(duration_ms,0), COALESCE(person_num,1)
+		FROM sync_log ORDER BY id DESC LIMIT 1`).Scan(&id, &t, &kind, &ok, &device, &typesJSON, &msg, &received, &added, &bytes, &durMS, &pnum)
+	if err != nil || kind != "ingest" || !ok || device != e.Device || pnum != max(e.PersonNum, 1) {
 		return false
 	}
 	last, err := time.Parse(time.RFC3339, t)
@@ -666,10 +711,21 @@ func (d *DB) mergeIngest(e LogEntry) bool {
 }
 
 func (d *DB) Logs(limit int, before int64, kind string) ([]LogEntry, error) {
+	return d.LogsFor(limit, before, kind, 0)
+}
+
+// LogsFor is Logs of one person's data (0: everyone's). Rows from before people existed
+// are the owner's.
+func (d *DB) LogsFor(limit int, before int64, kind string, person int64) ([]LogEntry, error) {
 	q := `SELECT id, time, kind, COALESCE(device,''), COALESCE(ip,''), COALESCE(received,0), COALESCE(added,0),
-	             COALESCE(bytes,0), COALESCE(duration_ms,0), ok, COALESCE(message,''), COALESCE(types,'[]')
+	             COALESCE(bytes,0), COALESCE(duration_ms,0), ok, COALESCE(message,''), COALESCE(types,'[]'),
+	             COALESCE(person,''), COALESCE(person_num,1)
 	      FROM sync_log WHERE 1=1`
 	var args []any
+	if person > 0 {
+		q += ` AND COALESCE(person_num,1) = ?`
+		args = append(args, person)
+	}
 	if before > 0 {
 		q += ` AND id < ?`
 		args = append(args, before)
@@ -689,7 +745,8 @@ func (d *DB) Logs(limit int, before int64, kind string) ([]LogEntry, error) {
 	for rows.Next() {
 		var e LogEntry
 		var types string
-		if err := rows.Scan(&e.ID, &e.Time, &e.Kind, &e.Device, &e.IP, &e.Received, &e.Added, &e.Bytes, &e.DurationMS, &e.OK, &e.Message, &types); err != nil {
+		if err := rows.Scan(&e.ID, &e.Time, &e.Kind, &e.Device, &e.IP, &e.Received, &e.Added, &e.Bytes, &e.DurationMS, &e.OK, &e.Message, &types,
+			&e.Person, &e.PersonNum); err != nil {
 			return nil, err
 		}
 		_ = json.Unmarshal([]byte(types), &e.Types)
@@ -701,10 +758,14 @@ func (d *DB) Logs(limit int, before int64, kind string) ([]LogEntry, error) {
 type DayCount = model.DayCount
 
 // Activity returns per-day ingest activity for the last n days (local time).
-func (d *DB) Activity(days int) ([]DayCount, error) {
+func (d *DB) Activity(days int) ([]DayCount, error) { return d.activity(days, d, 0) }
+
+// activity is Activity of the samples in d, with the syncs of person (0: all) from the
+// history in logs.
+func (d *DB) activity(days int, logs *DB, person int64) ([]DayCount, error) {
 	since := time.Now().AddDate(0, 0, -days+1).Format("2006-01-02")
-	rows, err := d.sql.Query(`SELECT substr(time,1,10) AS day, SUM(COALESCE(added,0)), SUM(ok), SUM(1-ok)
-		FROM sync_log WHERE kind='ingest' AND substr(time,1,10) >= ? GROUP BY day`, since)
+	rows, err := logs.sql.Query(`SELECT substr(time,1,10) AS day, SUM(COALESCE(added,0)), SUM(ok), SUM(1-ok)
+		FROM sync_log WHERE kind='ingest' AND substr(time,1,10) >= ? AND (? = 0 OR COALESCE(person_num,1) = ?) GROUP BY day`, since, person, person)
 	if err != nil {
 		return nil, err
 	}
@@ -764,50 +825,70 @@ const (
 
 // AddDevice stores a new token. With a deviceID that is already known, it replaces that
 // device's token instead (its old token stops working at once) and repaired is true.
-func (d *DB) AddDevice(name, token, ip, deviceID, scope string) (dev Device, repaired bool, err error) {
+//
+// person is the person the device belongs to (0: an AI token that sees everyone) and
+// family whether it may manage every person.
+func (d *DB) AddDevice(name, token, ip, deviceID, scope string, person int64, family bool) (dev Device, repaired bool, err error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	now := nowISO()
 	if scope == "" {
 		scope = scopeDevice
 	}
+	var p any
+	if person > 0 {
+		p = person
+	}
 	if deviceID != "" {
-		res, err := d.sql.Exec(`UPDATE devices SET name = ?, token_hash = ?, last_seen = ?, last_ip = ?, revoked = 0, scope = ?
-			WHERE device_id = ?`, name, hashToken(token), now, ip, scope, deviceID)
+		res, err := d.sql.Exec(`UPDATE devices SET name = ?, token_hash = ?, last_seen = ?, last_ip = ?, revoked = 0, scope = ?, person = ?, family = ?
+			WHERE device_id = ?`, name, hashToken(token), now, ip, scope, p, family, deviceID)
 		if err != nil {
 			return dev, false, err
 		}
 		if n, _ := res.RowsAffected(); n > 0 {
-			dev, err = d.deviceWhere(`device_id = ?`, deviceID)
+			dev, err = d.deviceWhere(`d.device_id = ?`, deviceID)
 			return dev, true, err
 		}
 	}
-	res, err := d.sql.Exec(`INSERT INTO devices (name, token_hash, created, last_seen, last_ip, device_id, scope) VALUES (?,?,?,?,?,?,?)`,
-		name, hashToken(token), now, now, ip, nullable(deviceID), scope)
+	res, err := d.sql.Exec(`INSERT INTO devices (name, token_hash, created, last_seen, last_ip, device_id, scope, person, family) VALUES (?,?,?,?,?,?,?,?,?)`,
+		name, hashToken(token), now, now, ip, nullable(deviceID), scope, p, family)
 	if err != nil {
 		return dev, false, err
 	}
 	id, _ := res.LastInsertId()
-	dev, err = d.deviceWhere(`id = ?`, id)
+	dev, err = d.deviceWhere(`d.id = ?`, id)
 	return dev, false, err
 }
 
-const deviceCols = `id, name, created, COALESCE(last_seen,''), COALESCE(last_ip,''), revoked, scope, COALESCE(device_id,'')`
+// DeviceByDeviceID is the device paired with the phone's own id.
+func (d *DB) DeviceByDeviceID(deviceID string) (Device, bool) {
+	if deviceID == "" {
+		return Device{}, false
+	}
+	dev, err := d.deviceWhere(`d.device_id = ?`, deviceID)
+	return dev, err == nil
+}
+
+const deviceCols = `d.id, d.name, d.created, COALESCE(d.last_seen,''), COALESCE(d.last_ip,''), d.revoked, d.scope, COALESCE(d.device_id,''),
+	COALESCE(d.person,0), d.family, COALESCE(p.key,''), COALESCE(p.name,'')`
+
+const deviceFrom = ` FROM devices d LEFT JOIN people p ON p.id = d.person`
 
 func scanDevice(sc interface{ Scan(...any) error }) (Device, error) {
 	var dev Device
-	err := sc.Scan(&dev.ID, &dev.Name, &dev.Created, &dev.LastSeen, &dev.LastIP, &dev.Revoked, &dev.Scope, &dev.DeviceID)
+	err := sc.Scan(&dev.ID, &dev.Name, &dev.Created, &dev.LastSeen, &dev.LastIP, &dev.Revoked, &dev.Scope, &dev.DeviceID,
+		&dev.PersonNum, &dev.Family, &dev.Person, &dev.PersonName)
 	return dev, err
 }
 
 func (d *DB) deviceWhere(where string, args ...any) (Device, error) {
-	return scanDevice(d.sql.QueryRow(`SELECT `+deviceCols+` FROM devices WHERE `+where, args...))
+	return scanDevice(d.sql.QueryRow(`SELECT `+deviceCols+deviceFrom+` WHERE `+where, args...))
 }
 
 // LookupToken returns the device that owns token, revoked or not. ok is false when no
 // device has this token.
 func (d *DB) LookupToken(token string) (Device, bool) {
-	dev, err := d.deviceWhere(`token_hash = ?`, hashToken(token))
+	dev, err := d.deviceWhere(`d.token_hash = ?`, hashToken(token))
 	return dev, err == nil
 }
 
@@ -824,7 +905,7 @@ func (d *DB) TouchDevice(id int64, ip string) {
 }
 
 func (d *DB) Devices() ([]Device, error) {
-	rows, err := d.sql.Query(`SELECT ` + deviceCols + ` FROM devices ORDER BY revoked, id DESC`)
+	rows, err := d.sql.Query(`SELECT ` + deviceCols + deviceFrom + ` ORDER BY d.revoked, d.id DESC`)
 	if err != nil {
 		return nil, err
 	}
