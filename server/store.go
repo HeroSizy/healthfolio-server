@@ -79,6 +79,10 @@ CREATE TABLE IF NOT EXISTS people (
     relation TEXT NOT NULL DEFAULT '', birth TEXT NOT NULL DEFAULT '', sex TEXT NOT NULL DEFAULT '',
     created TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS person_keys (key TEXT PRIMARY KEY, person INTEGER NOT NULL);
+-- person_claims are one-time tokens a family phone makes to hand a person over to their own
+-- phone (POST /people/{id}/claims); only the hash is kept.
+CREATE TABLE IF NOT EXISTS person_claims (token_hash TEXT PRIMARY KEY, person INTEGER NOT NULL,
+	expires INTEGER NOT NULL, created TEXT NOT NULL);
 `
 
 // MCPEnabled reports whether AI assistants may connect. It is on unless turned off in the

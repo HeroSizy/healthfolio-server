@@ -178,6 +178,7 @@ func (s *Server) routes() {
 	m.HandleFunc("POST /mcp/tokens", s.handleMCPToken)
 	m.HandleFunc("GET /people", s.handlePeople)
 	m.HandleFunc("POST /people/me", s.handleClaimPerson)
+	m.HandleFunc("POST /people/{id}/claims", s.handleNewClaim)
 	m.HandleFunc("PUT /people/{id}", s.handlePutPerson)
 	m.HandleFunc("DELETE /people/{id}", s.handleDeletePerson)
 	m.HandleFunc("GET /skill.md", func(w http.ResponseWriter, r *http.Request) {

@@ -96,6 +96,30 @@ For a phone that paired before the app knew about people. Send once, when `GET /
 - 409 `{"reason": "person_taken"}`: the id belongs to another person. Only the server owner
   can move the phone (dashboard › Devices › Person).
 
+### Taking over a profile with a hand-over code
+
+A family member's profile was made on a family phone, and then they pair their own phone,
+which gets a person of its own. To join the two, the family phone makes a code and the
+member's phone sends it:
+
+```json
+{"id": "A93E…", "claim": "5d1e…"}
+```
+
+- 200 `{"person": {…}}`: the phone's own person is merged into `id` (data, reports with
+  the same report id kept once, devices, and its ids, which now also find `id`). The phone
+  keeps `family: false`.
+- 403 `{"reason": "bad_claim"}`: the code is wrong, used, expired, or for another person.
+- 409 `{"reason": "owner"}`: `id` is the server owner, or this phone holds the owner.
+
+A phone that has not paired yet does not need a code: it pairs with `person_id` = that id.
+
+## POST /people/{id}/claims
+
+Family phones only (403 `person_not_allowed` otherwise). Makes a one-time hand-over code for
+the person: 200 `{"token": "…", "expires": 1764201600}` (Unix seconds, 7 days). The server
+keeps only its hash. 404 `unknown_person`; 409 `owner` for the server owner.
+
 ## GET /people
 
 The people this token may see: everyone for a family phone, else only its own person.
@@ -153,3 +177,8 @@ The answer is the same as before. MCP tools then take a `person` argument (see
    `person_not_allowed`, tell the user to turn on "Can manage the family" for this phone in
    the server's dashboard.
 5. Reports of a family member: `POST /report?person=<id>`. HealthKit: no `person`.
+6. Reading reports back: `GET /backup/reports` and `/backup/reports/{id}` read the phone's
+   own person; a family phone adds `?person=<id>` for someone else (403
+   `person_not_allowed` for a plain phone).
+7. Hand-over: `POST /people/{id}/claims` on the family phone, then `POST /people/me` with
+   `claim` on the member's phone.

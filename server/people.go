@@ -33,6 +33,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 	"unicode/utf8"
 
 	"github.com/herosizy/healthsync-server/model"
@@ -624,8 +625,9 @@ func (s *Server) handleClaimPerson(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		ID   string `json:"id"`
-		Name string `json:"name"`
+		ID    string `json:"id"`
+		Name  string `json:"name"`
+		Claim string `json:"claim"`
 	}
 	_ = json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&req)
 	req.ID = strings.TrimSpace(req.ID)
@@ -633,11 +635,15 @@ func (s *Server) handleClaimPerson(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 400, map[string]any{"error": "a person id has 1 to 128 letters, digits and . _ : -", "reason": "bad_id"})
 		return
 	}
-	n := dev.PersonNum
-	if dev.ID == 0 || n == 0 {
+	if dev.ID == 0 || (dev.PersonNum == 0 && req.Claim == "") {
 		writeJSON(w, 409, map[string]any{"error": "this token belongs to no person", "reason": "no_person"})
 		return
 	}
+	if req.Claim != "" {
+		s.takeOver(w, r, dev, req.ID, req.Claim)
+		return
+	}
+	n := dev.PersonNum
 	s.peopleMu.Lock()
 	defer s.peopleMu.Unlock()
 	if p, found := s.db.personByKey(req.ID); found && p.Num != n {
@@ -654,6 +660,112 @@ func (s *Server) handleClaimPerson(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	p, _ := s.db.personByNum(n)
+	p.Me = true
+	writeJSON(w, 200, map[string]any{"person": s.summary(p)})
+}
+
+// ---------------------------------------------------------------- handing a person over
+
+// claimLife is how long a hand-over token works.
+const claimLife = 7 * 24 * time.Hour
+
+var errBadClaim = errors.New("this hand-over code is wrong, used or expired")
+
+// addClaim keeps a hand-over token for person n, by its hash, and drops expired ones.
+func (d *DB) addClaim(n int64, token string, expires time.Time) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if _, err := d.sql.Exec(`DELETE FROM person_claims WHERE expires <= ?`, time.Now().Unix()); err != nil {
+		return err
+	}
+	_, err := d.sql.Exec(`INSERT INTO person_claims (token_hash, person, expires, created) VALUES (?, ?, ?, ?)`,
+		hashToken(token), n, expires.Unix(), time.Now().UTC().Format(time.RFC3339))
+	return err
+}
+
+// useClaim uses up a hand-over token for person n: false if it is not one, or expired.
+func (d *DB) useClaim(n int64, token string) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	res, err := d.sql.Exec(`DELETE FROM person_claims WHERE token_hash = ? AND person = ? AND expires > ?`,
+		hashToken(token), n, time.Now().Unix())
+	if err != nil {
+		return false
+	}
+	c, _ := res.RowsAffected()
+	return c == 1
+}
+
+// POST /people/{id}/claims: a phone that manages the family makes a one-time code, so that
+// the person's own phone can take over their profile (POST /people/me with "claim").
+func (s *Server) handleNewClaim(w http.ResponseWriter, r *http.Request) {
+	dev, ok := s.authPhone(w, r, "/people/claims")
+	if !ok {
+		return
+	}
+	if !seesEveryone(dev) {
+		writeJSON(w, 403, map[string]any{"error": "only a phone that may manage the family can hand a person over", "reason": "person_not_allowed"})
+		return
+	}
+	p, found := s.db.personByKey(r.PathValue("id"))
+	if !found {
+		writeJSON(w, 404, map[string]any{"error": "no such person", "reason": "unknown_person"})
+		return
+	}
+	if p.Owner {
+		writeJSON(w, 409, map[string]any{"error": "the server owner cannot be handed over", "reason": "owner"})
+		return
+	}
+	token := randomHex(16)
+	expires := time.Now().Add(claimLife)
+	if err := s.db.addClaim(p.Num, token, expires); err != nil {
+		errJSON(w, 500, err.Error())
+		return
+	}
+	s.db.Log(LogEntry{Kind: "pair", Device: dev.Name, IP: clientIP(r), OK: true, Message: "hand-over code made for " + personLabel(p)})
+	writeJSON(w, 200, map[string]any{"token": token, "expires": expires.Unix()})
+}
+
+// takeOver makes the asking phone's person part of person key with a hand-over token: the
+// phone's own person (made when it paired) is merged into them, data, devices and ids.
+func (s *Server) takeOver(w http.ResponseWriter, r *http.Request, dev Device, key, claim string) {
+	bad := func() {
+		writeJSON(w, 403, map[string]any{"error": errBadClaim.Error(), "reason": "bad_claim"})
+	}
+	p, found := s.db.personByKey(key)
+	if !found {
+		bad()
+		return
+	}
+	if p.Owner {
+		writeJSON(w, 409, map[string]any{"error": "the server owner cannot be handed over", "reason": "owner"})
+		return
+	}
+	var from Person
+	if dev.PersonNum != 0 && dev.PersonNum != p.Num {
+		from, found = s.db.personByNum(dev.PersonNum)
+		if found && from.Owner {
+			writeJSON(w, 409, map[string]any{"error": "this phone holds the server owner, who cannot be merged into someone else", "reason": "owner"})
+			return
+		}
+	}
+	if !s.db.useClaim(p.Num, claim) {
+		bad()
+		return
+	}
+	var err error
+	switch {
+	case from.Num != 0:
+		err = s.mergePeople(from, p)
+	case dev.PersonNum != p.Num:
+		err = s.db.SetDevicePerson(dev.ID, p.Num) // its person was deleted
+	}
+	if err != nil {
+		s.peopleErr(w, err)
+		return
+	}
+	s.db.Log(LogEntry{Kind: "pair", Device: dev.Name, IP: clientIP(r), OK: true, Message: "took over " + personLabel(p)})
+	p, _ = s.db.personByNum(p.Num)
 	p.Me = true
 	writeJSON(w, 200, map[string]any{"person": s.summary(p)})
 }
@@ -704,6 +816,7 @@ func (d *DB) forgetPerson(n int64) error {
 		`UPDATE devices SET revoked = 1 WHERE person = ? AND scope = 'mcp'`,
 		`UPDATE devices SET person = NULL, family = 0 WHERE person = ?`,
 		`DELETE FROM person_keys WHERE person = ?`,
+		`DELETE FROM person_claims WHERE person = ?`,
 		`DELETE FROM people WHERE id = ?`,
 	} {
 		if _, err := d.sql.Exec(q, n); err != nil {
@@ -860,6 +973,9 @@ func (d *DB) movePerson(from, into int64, fromKey string) error {
 		if _, err := d.sql.Exec(q, into, from); err != nil {
 			return err
 		}
+	}
+	if _, err := d.sql.Exec(`DELETE FROM person_claims WHERE person = ?`, from); err != nil {
+		return err
 	}
 	if _, err := d.sql.Exec(`DELETE FROM people WHERE id = ?`, from); err != nil {
 		return err

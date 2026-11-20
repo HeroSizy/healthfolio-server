@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 // pairAs pairs a phone with a fresh code and returns the answer.
@@ -312,5 +313,61 @@ func TestDevicesMigrateToOwner(t *testing.T) {
 				t.Fatalf("AI token after upgrade sees one person: %+v", d)
 			}
 		}
+	}
+}
+
+// A family phone hands Mum's profile over to Mum's own phone: her phone's own person
+// (made when it paired) is merged into Mum, and the code works once.
+func TestHandOver(t *testing.T) {
+	_, ts := newTestServer(t)
+	u := ts.URL
+	owner := pairAs(t, u, `{"device":"Owner","device_id":"dev-o","person_id":"PID-O","person_name":"Owner"}`)["token"].(string)
+	do(t, "PUT", u+"/people/PID-MUM", owner, `{"name":"Mum"}`)
+	rep := `{"report":{"id":"m1","date":"2026-09-01","items":[{"name":"Glucose","value":7.1,"flag":"high"}]},"files":[{"name":"a.jpg","data":"aGk="}]}`
+	if code, _ := do(t, "POST", u+"/report?person=PID-MUM", owner, rep); code != 200 {
+		t.Fatal("Mum's report")
+	}
+	// Mum's phone pairs with an id of its own and sends the same report and one more.
+	mumTok := pairAs(t, u, `{"device":"Mum's iPhone","device_id":"dev-m","person_id":"PID-M2","person_name":"Mum"}`)["token"].(string)
+	do(t, "POST", u+"/report", mumTok, rep)
+	do(t, "POST", u+"/report", mumTok, strings.Replace(rep, `"m1"`, `"m2"`, 1))
+
+	if code, r := do(t, "POST", u+"/people/PID-MUM/claims", mumTok, ""); code != 403 || r["reason"] != "person_not_allowed" {
+		t.Fatalf("a plain phone made a code: %d %v", code, r)
+	}
+	if code, r := do(t, "POST", u+"/people/PID-O/claims", owner, ""); code != 409 || r["reason"] != "owner" {
+		t.Fatalf("a code for the owner: %d %v", code, r)
+	}
+	_, c := do(t, "POST", u+"/people/PID-MUM/claims", owner, "")
+	code := c["token"].(string)
+	if c["expires"].(float64) < float64(time.Now().Add(6*24*time.Hour).Unix()) {
+		t.Fatalf("expires: %v", c)
+	}
+	if st, r := do(t, "POST", u+"/people/me", mumTok, `{"id":"PID-MUM","claim":"wrong"}`); st != 403 || r["reason"] != "bad_claim" {
+		t.Fatalf("a wrong code: %d %v", st, r)
+	}
+	if st, r := do(t, "POST", u+"/people/me", owner, `{"id":"PID-MUM","claim":"`+code+`"}`); st != 409 || r["reason"] != "owner" {
+		t.Fatalf("the owner's phone took Mum: %d %v", st, r)
+	}
+	st, r := do(t, "POST", u+"/people/me", mumTok, `{"id":"PID-MUM","claim":"`+code+`"}`)
+	if st != 200 || r["person"].(map[string]any)["id"] != "PID-MUM" || r["person"].(map[string]any)["reports"].(float64) != 2 {
+		t.Fatalf("take over: %d %v", st, r)
+	}
+	if st, r := do(t, "POST", u+"/people/me", mumTok, `{"id":"PID-MUM","claim":"`+code+`"}`); st != 403 || r["reason"] != "bad_claim" {
+		t.Fatalf("a code used twice: %d %v", st, r)
+	}
+	// her phone now reads Mum's reports without ?person=, and her old id finds her too
+	if _, r := do(t, "GET", u+"/backup/reports", mumTok, ""); len(r["reports"].([]any)) != 2 {
+		t.Fatalf("Mum's phone reads: %v", r)
+	}
+	if _, au := do(t, "GET", u+"/auth", mumTok, ""); au["person"].(map[string]any)["id"] != "PID-MUM" || au["family"] != false {
+		t.Fatalf("auth after take over: %v", au)
+	}
+	if _, pp := do(t, "GET", u+"/people", owner, ""); len(pp["people"].([]any)) != 2 {
+		t.Fatalf("people after take over: %v", pp)
+	}
+	// a plain phone can't read someone else's reports
+	if st, _ := do(t, "GET", u+"/backup/reports?person=PID-O", mumTok, ""); st != 403 {
+		t.Fatalf("Mum's phone read the owner's reports: %d", st)
 	}
 }

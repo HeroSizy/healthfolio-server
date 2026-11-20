@@ -19,6 +19,8 @@ own.
   to another person.
 - AI assistants get `list_people` and a `person` argument on every tool; `query_sql`
   reads one person's database. A token made for one person sees only them.
+- A family phone can hand a profile over to the person's own phone with a one-time code
+  (7 days); the phone's own profile is then merged into it.
 - The app's API for people is in [docs/people-api.md](docs/people-api.md).
 
 ## 0.1.0

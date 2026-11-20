@@ -528,7 +528,7 @@ func timeoutErr(ctx context.Context, err error) error {
 
 // hiddenTables hold the server's own bookkeeping, not health data: the paired devices (with
 // their token hashes and addresses) and the server's preferences. query_sql may not read them.
-var hiddenTables = map[string]bool{"devices": true, "prefs": true, "people": true, "person_keys": true}
+var hiddenTables = map[string]bool{"devices": true, "prefs": true, "people": true, "person_keys": true, "person_claims": true}
 
 // sqlPolicy is the SQLite authorizer for query_sql: reading and computing only, nothing
 // from hiddenTables, no client addresses from sync_log, and no functions that touch
